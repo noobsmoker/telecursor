@@ -1,0 +1,102 @@
+# Cursor Dynamics Foundation Model - Stage 1 Configuration
+# config/stage1_cursor_physics.yaml
+
+model:
+  name: "CursorDynamics-Base-v1"
+  architecture:
+    # Tokenization
+    position_bins: 1024  # 0-1920px mapped to log-spaced bins
+    velocity_bins: 512   # Log-scaled: slow (0-10px/s) to fast (>1000px/s)
+    acceleration_bins: 256  # Jerk detection for human-ness validation
+    button_states: 8     # Bitmask combinations
+
+    # Transformer core (train from scratch)
+    d_model: 768
+    n_layers: 12
+    n_heads: 12
+    d_ff: 3072           # 4x d_model
+    dropout: 0.1
+    attention_dropout: 0.1
+    activation: "gelu"
+
+    # Positional encoding
+    pos_encoding: "learnable"  # Learnable positional embeddings
+    max_seq_len: 4096          # ~80 seconds at 50Hz
+
+    # Cursor-specific inductive biases
+    physics_constraints: true   # Penalize impossible velocity jumps
+    temporal_resolution: 0.02   # 50Hz native, subsample to 20Hz during training
+
+training:
+  # Optimization
+  optimizer: "AdamW"
+  lr: 3.0e-4
+  weight_decay: 0.1
+  betas: [0.9, 0.95]
+  eps: 1.0e-8
+
+  # Learning rate schedule
+  lr_schedule: "cosine_with_warmup"
+  warmup_steps: 10000          # ~10% of first epoch
+  max_steps: 500000            # ~50 epochs on projected data
+  min_lr_ratio: 0.1           # End at 3e-5
+
+  # Regularization
+  gradient_clipping: 1.0
+  dropout_schedule: "linear_increase"  # 0.0 -> 0.1 over first 20%
+
+  # Batch configuration
+  batch_size: 512              # Global batch across all GPUs
+  micro_batch: 32              # Per-device before gradient accumulation
+  sequence_length: 2048        # Context window (40 seconds)
+
+  # Data augmentation
+  augmentation:
+    temporal_jitter: 0.1        # ±10% speed variation
+    spatial_noise: 2.0         # ±2px Gaussian noise
+    occlusion_masking: 0.15   # Mask 15% of trajectory (learn to interpolate)
+    viewport_resizing: [0.5, 2.0]  # Simulate different screen sizes
+    left_handed_flip: 0.5      # Mirror x-coordinate (50% of batches)
+
+  # Loss composition
+  loss_weights:
+    next_position: 1.0         # Primary: predict (x,y)
+    velocity_consistency: 0.5  # Physics smoothness
+    acceleration_jerk: 0.3     # Human motor constraints
+    attention_heatmap: 0.2     # Where on page (auxiliary)
+
+  # Evaluation
+  eval_every: 5000
+  save_every: 10000
+  keep_last_n: 5               # Checkpoint retention
+
+hardware:
+  precision: "bf16-mixed"       # Or fp8 on H100s
+  distributed: "FSDP"          # Fully Sharded Data Parallel
+  gradient_checkpointing: true # Trade compute for memory
+  compile: true                # torch.compile for speed
+
+data:
+  sources:
+    - "cursor-telemetry/trajectories-v1"
+    - "cursor-telemetry/synthetic-human-baseline"
+
+  preprocessing:
+    filter_bot_likelihood: 0.9  # Remove trajectories scoring >0.9 bot probability
+    min_session_duration: 5000  # 5 seconds minimum
+    max_session_duration: 600000  # 10 minutes maximum
+    deduplication: "perceptual_hash"  # Remove identical sessions (bots)
+
+privacy:
+  # Differential privacy settings
+  enable_dp: true
+  epsilon: 3.0                 # Privacy budget per sample
+  delta: 1e-5
+  max_grad_norm: 1.0           # Per-sample gradient clipping
+  noise_multiplier: 1.1        # For DP-SGD
+
+logging:
+  backend: "wandb"             # Weights & Biases
+  project: "telecursor"
+  entity: "cursor-telemetry"
+  log_every: 100

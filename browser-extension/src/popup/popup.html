@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CursorTelemetry</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    
+    body {
+      width: 320px;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      font-size: 14px;
+      color: #333;
+      background: #fff;
+    }
+    
+    .header {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      padding: 16px;
+      text-align: center;
+    }
+    
+    .header h1 {
+      font-size: 18px;
+      font-weight: 600;
+      margin-bottom: 4px;
+    }
+    
+    .header p {
+      font-size: 12px;
+      opacity: 0.9;
+    }
+    
+    .content {
+      padding: 16px;
+    }
+    
+    .status-card {
+      background: #f8f9fa;
+      border-radius: 8px;
+      padding: 16px;
+      margin-bottom: 16px;
+    }
+    
+    .status-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 12px;
+    }
+    
+    .status-row:last-child {
+      margin-bottom: 0;
+    }
+    
+    .status-label {
+      color: #666;
+      font-size: 13px;
+    }
+    
+    .status-value {
+      font-weight: 600;
+    }
+    
+    .status-value.active {
+      color: #10b981;
+    }
+    
+    .status-value.inactive {
+      color: #ef4444;
+    }
+    
+    .toggle-container {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    
+    .toggle {
+      position: relative;
+      width: 48px;
+      height: 26px;
+      background: #ccc;
+      border-radius: 13px;
+      cursor: pointer;
+      transition: background 0.3s;
+    }
+    
+    .toggle.active {
+      background: #10b981;
+    }
+    
+    .toggle::after {
+      content: '';
+      position: absolute;
+      top: 3px;
+      left: 3px;
+      width: 20px;
+      height: 20px;
+      background: white;
+      border-radius: 50%;
+      transition: transform 0.3s;
+    }
+    
+    .toggle.active::after {
+      transform: translateX(22px);
+    }
+    
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+    
+    .stat-card {
+      background: #f8f9fa;
+      border-radius: 8px;
+      padding: 12px;
+      text-align: center;
+    }
+    
+    .stat-value {
+      font-size: 20px;
+      font-weight: 700;
+      color: #667eea;
+    }
+    
+    .stat-label {
+      font-size: 11px;
+      color: #666;
+      margin-top: 4px;
+    }
+    
+    .actions {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    
+    .btn {
+      padding: 12px 16px;
+      border: none;
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    
+    .btn-primary {
+      background: #667eea;
+      color: white;
+    }
+    
+    .btn-primary:hover {
+      background: #5a67d8;
+    }
+    
+    .btn-secondary {
+      background: #f3f4f6;
+      color: #333;
+    }
+    
+    .btn-secondary:hover {
+      background: #e5e7eb;
+    }
+    
+    .btn-danger {
+      background: #fee2e2;
+      color: #dc2626;
+    }
+    
+    .btn-danger:hover {
+      background: #fecaca;
+    }
+    
+    .consent-section {
+      margin-top: 16px;
+      padding-top: 16px;
+      border-top: 1px solid #e5e7eb;
+    }
+    
+    .consent-link {
+      color: #667eea;
+      text-decoration: none;
+      font-size: 13px;
+    }
+    
+    .consent-link:hover {
+      text-decoration: underline;
+    }
+    
+    .footer {
+      padding: 12px 16px;
+      background: #f8f9fa;
+      text-align: center;
+      font-size: 11px;
+      color: #666;
+    }
+    
+    .footer a {
+      color: #667eea;
+      text-decoration: none;
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>CursorTelemetry</h1>
+    <p>Open Cursor Intelligence</p>
+  </div>
+  
+  <div class="content">
+    <div class="status-card">
+      <div class="status-row">
+        <span class="status-label">Tracking</span>
+        <div class="toggle-container">
+          <span class="status-value" id="status-text">Inactive</span>
+          <div class="toggle" id="tracking-toggle"></div>
+        </div>
+      </div>
+      <div class="status-row">
+        <span class="status-label">Privacy Level</span>
+        <span class="status-value" id="privacy-level">ε = 3.0</span>
+      </div>
+    </div>
+    
+    <div class="stats-grid">
+      <div class="stat-card">
+        <div class="stat-value" id="stat-sessions">0</div>
+        <div class="stat-label">Sessions</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value" id="stat-samples">0</div>
+        <div class="stat-label">Samples</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value" id="stat-hours">0h</div>
+        <div class="stat-label">Duration</div>
+      </div>
+    </div>
+    
+    <div class="actions">
+      <button class="btn btn-primary" id="btn-settings">Settings</button>
+      <button class="btn btn-secondary" id="btn-export">Export My Data</button>
+      <button class="btn btn-danger" id="btn-clear">Clear All Data</button>
+    </div>
+    
+    <div class="consent-section">
+      <a href="#" class="consent-link" id="open-consent">Privacy & Consent Settings</a>
+    </div>
+  </div>
+  
+  <div class="footer">
+    <a href="https://github.com/telecursor/telecursor" target="_blank">View on GitHub</a> · 
+    <a href="https://telecursor.ai" target="_blank">Learn More</a>
+  </div>
+  
+  <script src="../privacy/local_dp.js"></script>
+  <script src="../privacy/consent.js"></script>
+  <script src="popup.js"></script>
+</body>
+</html>
