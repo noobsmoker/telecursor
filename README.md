@@ -1,186 +1,111 @@
-# TeleCursor - Open Cursor Intelligence Infrastructure
+# TeleCursor
 
-**Mission:** Build open-source infrastructure for understanding human-computer interaction at the motor level through transparent, opt-in cursor telemetry.
+Open infrastructure for cursor behavior research. Dataset and models for understanding human-computer interaction at the motor level.
 
-![CursorTelemetry](https://img.shields.io/badge/status-Alpha-orange)
-[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
-[![Project](https://img.shields.io/badge/Project-CursorCommons-green)](governance/CHARTER.md)
+## Overview
 
----
+TeleCursor collects opt-in cursor telemetry with formal differential privacy guarantees (ε ≤ 3.0) and trains foundation models on human navigation patterns. The system comprises:
 
-## What is TeleCursor?
+- **Browser extension**: Captures cursor trajectories with local privacy enforcement
+- **Server**: Receives, validates, and stores anonymized telemetry
+- **Dataset**: Curated behavioral data with bot detection and quality filtering
+- **Models**: Causal transformers (RoPE, SwiGLU) with physics-informed constraints
 
-TeleCursor creates a **public dataset** ("CursorNet") capturing the physics of human attention and decision-making as people browse the web. Unlike existing datasets that capture clicks or aggregated heatmaps, TeleCursor records the full trajectory — every curve, hesitation, and acceleration — along with semantic context.
+All components are open source. Data collection is strictly opt-in. No exclusive commercial rights reserved.
 
-**The goal:** Enable research and AI models that understand how humans actually navigate digital interfaces.
-
----
-
-## Why This Matters
-
-| Existing Dataset | What TeleCursor Adds |
-|-----------------|---------------------|
-| Mouse tracking (commercial) | Aggregated only, no trajectories, no intent |
-| Eye-tracking (academic) | Lab settings, expensive, small N |
-| Click streams | No spatial data, no motor dynamics |
-| Web navigation (Common Crawl) | No human behavior at all |
-
-**Your dataset captures:** The physics of human attention and decision-making in the wild.
-
-## The Vision
-
-Once trained, TeleCursor models enable:
-
-| Application | How |
-|-------------|-----|
-| **Accessibility** | Predict where motor-impaired users want to click |
-| **UX Research** | A/B test layouts by simulating 10,000 user sessions |
-| **UI Generation** | Generate layouts optimized for natural cursor flow |
-| **Bot Detection** | Distinguish humans from automation |
-| **Frustration Detection** | Identify confusing UX before users complain |
-| **Autonomous Browsing** | Train agents that navigate like humans |
-
----
-
-**This is computational behavioral HCI. The dataset itself becomes the contribution — models are just derivations.**
----
-
-## Quick Start
-
-### Install the Browser Extension
-
-1. Clone the repository:
-```bash
-git clone https://github.com/telecursor/telecursor.git
-cd telecursor
-```
-
-2. Load in Chrome/Firefox:
-   - Chrome: `chrome://extensions` → Developer mode → Load unpacked → select `browser-extension/`
-   - Firefox: `about:debugging` → This Firefox → Load Temporary Add-on → select any file in `browser-extension/`
-
-3. Click the extension icon, grant consent, and start contributing!
-
-### Train the Model
-
-```bash
-# Install dependencies
-pip install torch numpy
-
-# Train Stage 1 (Cursor Dynamics Foundation)
-python -m models.stage1_cursor_dynamics.train
-
-# Train Stage 2 (Semantic Grounding)
-python -m models.stage2_grounding.train
-```
-
----
-
-## Project Structure
+## Repository Structure
 
 ```
 telecursor/
-├── browser-extension/          # Chrome/Firefox extension
-│   ├── manifest.json
-│   └── src/
-│       ├── content.js          # Cursor tracking
-│       ├── background.js       # Service worker
-│       ├── popup/              # UI dashboard
-│       └── privacy/            # Local DP, consent
-│
-├── dataset/                     # Dataset tools
-│   ├── schema/                 # Data format
-│   └── preprocessing/          # Validation, anonymization
-│
-├── models/                     # Model architectures
-│   ├── stage1_cursor_dynamics/  # Foundation model
-│   ├── stage2_grounding/        # Semantic grounding
-│   └── stage3_task_reasoning/   # Task reasoning
-│
-├── privacy/                    # Privacy infrastructure
-│   ├── dp_sgd/                # DP-SGD training
-│   └── secure_aggregation/    # Federated learning
-│
-├── governance/                 # Community governance
-│   ├── CHARTER.md             # Core principles
-│   └── CODE_OF_CONDUCT.md
-│
-└── docs/                      # Documentation
+├── browser-extension/ # Chrome/Firefox extension (Manifest V3)
+│ ├── src/
+│ │ ├── content.js # Cursor capture and local processing
+│ │ ├── background.js # Upload queue and sync
+│ │ ├── privacy/ # Local differential privacy implementation
+│ │ └── utils/ # Circular buffers, compression
+│ └── manifest.json
+├── server/ # Node.js API server
+│ ├── src/
+│ │ ├── index.js # Express server, rate limiting
+│ │ ├── db/ # SQLite with WAL mode
+│ │ ├── validation/ # JSON Schema, bot detection
+│ │ └── privacy/ # Aggregation, k-anonymity
+│ └── package.json
+├── models/ # PyTorch training pipeline
+│ └── stage1_cursor_dynamics/
+│ ├── model.py # Causal transformer with RoPE
+│ ├── train.py # Training loop with checkpointing
+│ ├── dataset.py # Trajectory loader, tokenizer
+│ ├── config.yaml # Hyperparameters
+│ └── bot_detector.py # Automated trajectory filtering
+├── dataset/ # Data processing utilities
+│ └── preprocessing/
+├── docs/ # Documentation
+└── docker-compose.yml # Deployment configuration
 ```
 
----
+## Quick Start
 
-## Key Features
+### Prerequisites
 
-### 🛡️ Privacy by Design
+- Node.js 20+
+- Python 3.10+
+- Chrome 109+ or Firefox 115+
 
-- **Local differential privacy** — noise added before data leaves your device
-- **DP-SGD training** — models trained with formal privacy guarantees
-- **k-anonymity** — no individual trajectories identifiable in releases
-- **Full transparency** — you see exactly what data is collected
+### Server
 
-### 🔬 Research Infrastructure
-
-- **Stage 1:** Foundation model trained on raw cursor physics
-- **Stage 2:** Semantic grounding with page context
-- **Stage 3:** Task-level reasoning and intent prediction
-
-### 🤝 Community Governance
-
-TeleCursor is governed by **Cursor Commons** — a nonprofit that owns the dataset and models. Decisions are made by:
-- Code contributors
-- Data contributors  
-- Elected steering council
-
-See [governance/CHARTER.md](governance/CHARTER.md) for details.
-
----
-
-## Dataset Schema
-
-```json
-{
-  "trajectory_id": "uuid-v4",
-  "timestamp": "2026-04-09T01:21:00.000Z",
-  "session_context": {
-    "domain": "github.com",
-    "viewport": { "width": 1920, "height": 1080 },
-    "device_type": "desktop"
-  },
-  "samples": [
-    { "t": 0, "x": 145.5, "y": 892.0, "vx": 0.0, "vy": 0.0 }
-  ],
-  "interaction_events": [
-    { "t": 1250, "type": "hover_start", "target": { "role": "link" } }
-  ],
-  "task": {
-    "inferred_intent": "information_seeking"
-  }
-}
+```bash
+cd server
+npm install
+npm run dev
 ```
 
----
+Server runs at `http://localhost:3000` with hot reload.
+
+### Browser Extension
+
+1. Open Chrome → Extensions → Developer mode
+2. Load unpacked → Select `browser-extension/`
+3. Configure server URL in extension options
+
+### Model Training
+
+```bash
+cd models/stage1_cursor_dynamics
+pip install -r requirements.txt
+python train.py --data-dir /path/to/trajectories --config config.yaml
+```
+
+## Privacy Architecture
+
+Local differential privacy (Laplace mechanism, ε=3.0) applied in browser before transmission. Server receives only noisy aggregates. See [docs/PRIVACY.md](docs/PRIVACY.md) for formal guarantees and threat model.
 
 ## Contributing
 
-We welcome contributions! See [governance/CONTRIBUTING.md](governance/CONTRIBUTING.md).
+See [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md). Key areas:
 
-### Ways to Contribute
-
-1. **Use the extension** — Contribute your cursor data
-2. **Report issues** — Help us improve
-3. **Write code** — Fix bugs, add features
-4. **Write papers** — Research using the dataset
-5. **Spread the word** — Share with researchers
-
----
+- Model architecture (causal transformers, efficient attention)
+- Privacy engineering (secure aggregation, k-anonymity)
+- Browser extension (Manifest V3, Web Crypto API)
+- Data quality (bot detection, validation)
 
 ## License
 
-- **Code:** Apache 2.0
-- **Models:** OpenRAIL-M
-- **Data:** CC-BY-SA with privacy overlay
+MIT License. See [LICENSE](LICENSE). Data contributions are licensed under CC-BY-SA with privacy overlay.
 
----
+## Citation
 
-Join us at [telecursor.ai](https://telecursor.ai) | [GitHub](https://github.com/noobsmoker/telecursor)
+```bibtex
+@software{telecursor2025,
+ title={TeleCursor: Open Infrastructure for Cursor Behavior Research},
+ author={TeleCursor Contributors},
+ year={2025},
+ url={https://github.com/noobsmoker/telecursor}
+}
+```
+
+## Contact
+
+Issues: GitHub Issues 
+Security: security@telecursor.ai 
+Research: research@telecursor.ai

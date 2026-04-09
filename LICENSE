@@ -199,3 +199,19 @@
    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
    See the License for the specific language governing permissions and
    limitations under the License.
+---
+
+## DATA LICENSE ADDENDUM
+
+Contributions of cursor trajectory data to the TeleCursor project are licensed
+under Creative Commons Attribution-ShareAlike 4.0 International (CC-BY-SA 4.0),
+with the following modifications:
+
+1. **Privacy overlay**: All data is subject to differential privacy mechanisms
+   before aggregation and release.
+
+2. **No re-identification**: Users of the dataset agree not to attempt to
+   re-identify individual contributors.
+
+3. **Research use**: Commercial use permitted, but models trained on this data
+   must acknowledge the source per CC-BY-SA requirements.
