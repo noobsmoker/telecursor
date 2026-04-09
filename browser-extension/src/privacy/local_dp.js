@@ -166,32 +166,35 @@ class LocalPrivacyFilter {
   }
 
   /**
-   * Get or generate salt using Extension Storage API
+   * Get or generate salt using Extension Storage API only
+   * B-005: Fail closed - no localStorage fallback
    */
   async _getSecureSalt() {
     const storageKey = 'telecursor_secure_salt';
     
-    // Try extension storage API first
+    // Only use extension storage API - fail if unavailable
     if (typeof chrome !== 'undefined' && chrome.storage) {
       try {
         const result = await chrome.storage.local.get(storageKey);
         if (result[storageKey]) return result[storageKey];
+        
+        // Generate new cryptographically secure salt
+        const saltBytes = new Uint8Array(32);
+        crypto.getRandomValues(saltBytes);
+        const salt = Array.from(saltBytes).map(b => b.toString(16).padStart(2, '0')).join('');
+        
+        // Store using extension API only
+        await chrome.storage.local.set({ [storageKey]: salt });
+        return salt;
       } catch (e) {
-        // Fall back to localStorage
+        // B-005: Fail closed - don't fall back to localStorage
+        console.error('[Privacy] Secure storage unavailable, failing closed');
+        throw new Error('Secure storage required but unavailable');
       }
     }
     
-    // Fallback to localStorage
-    const stored = localStorage.getItem(storageKey);
-    if (stored) return stored;
-    
-    // Generate new cryptographically secure salt
-    const saltBytes = new Uint8Array(32);
-    crypto.getRandomValues(saltBytes);
-    const salt = Array.from(saltBytes).map(b => b.toString(16).padStart(2, '0')).join('');
-    
-    localStorage.setItem(storageKey, salt);
-    return salt;
+    // B-005: Fail closed - no fallback
+    throw new Error('Extension storage API not available');
   }
 
   /**
