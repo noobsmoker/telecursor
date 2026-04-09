@@ -44,97 +44,26 @@ export function createTrajectoryRoutes(db) {
 
   /**
    * POST /api/v1/trajectories
-   * Submit a new cursor trajectory
+   * Submit a new cursor trajectory (single)
    */
   router.post('/', (req, res) => {
     try {
       const data = req.body;
       
-      // Validate required fields
-      if (!data.session_context || !data.samples?.length || !data.anonymization) {
-        return res.status(400).json({ 
-          error: 'Missing required fields: session_context, samples, anonymization' 
-        });
+      // Handle batch submission
+      if (data.trajectories && Array.isArray(data.trajectories)) {
+        return handleBatchSubmit(data.trajectories, db, res);
       }
-
-      // Verify consent
-      if (!data.anonymization.user_consent) {
-        return res.status(403).json({ 
-          error: 'User consent required for data submission' 
-        });
-      }
-
-      // Sanitize inputs
-      const trajectoryId = uuidv4();
-      const domainCategory = categorizeDomain(data.session_context.domain || '');
-      const pagePathHash = hashString(data.session_context.page_path || '');
-      const samples = Array.isArray(data.samples) ? data.samples : [];
-      const events = Array.isArray(data.interaction_events) ? data.interaction_events : [];
-
-      // Calculate stats
-      const sampleCount = samples.length;
-      const durationMs = sampleCount > 0 
-        ? samples[sampleCount - 1].t - samples[0].t 
-        : 0;
       
-      const eventCounts = countEvents(events);
-
-      // Use transaction for atomicity
-      const insertTransaction = db.transaction(() => {
-        // Insert trajectory metadata
-        insertTrajectory.run(
-          trajectoryId,
-          domainCategory,
-          pagePathHash,
-          Math.min(Math.max(data.session_context.viewport?.width || 0, 0), 10000),
-          Math.min(Math.max(data.session_context.viewport?.height || 0, 0), 10000),
-          sanitizeString(data.session_context.device_type, 20),
-          sanitizeString(data.session_context.input_method, 20),
-          sampleCount,
-          Math.min(durationMs, 600000), // Cap at 10 min
-          eventCounts.clicks,
-          eventCounts.hover,
-          eventCounts.scroll
-        );
-
-        // Batch insert samples (every 10th for storage efficiency)
-        const downsampleRate = 10;
-        for (let i = 0; i < samples.length; i += downsampleRate) {
-          const s = samples[i];
-          insertSampleBatch.run(
-            trajectoryId,
-            Math.round(s.t),
-            Math.round(s.x * 10) / 10,
-            Math.round(s.y * 10) / 10,
-            Math.round(Math.max(-5000, Math.min(5000, s.vx || 0))),
-            Math.round(Math.max(-5000, Math.min(5000, s.vy || 0)))
-          );
-        }
-
-        // Batch insert events
-        for (const event of events) {
-          insertEventBatch.run(
-            trajectoryId,
-            Math.round(event.t || 0),
-            sanitizeString(event.type, 30),
-            Math.round(event.x || 0),
-            Math.round(event.y || 0),
-            sanitizeString(event.target?.tag, 10),
-            sanitizeString(event.target?.role, 30),
-            sanitizeString(event.target?.semantic_category, 20)
-          );
-        }
-
-        // Update daily stats
-        const today = new Date().toISOString().split('T')[0];
-        updateDailyStats.run(today, sampleCount, durationMs, sampleCount, durationMs);
-      });
-
-      insertTransaction();
+      // Single trajectory submission (existing code)
+      const result = insertTrajectoryData(data, db);
+      if (result.error) {
+        return res.status(400).json({ error: result.error });
+      }
       
       res.status(201).json({
         success: true,
-        trajectory_id: trajectoryId,
+        trajectory_id: result.trajectory_id,
         message: 'Trajectory recorded'
       });
       
@@ -143,6 +72,161 @@ export function createTrajectoryRoutes(db) {
       res.status(500).json({ error: 'Failed to record trajectory' });
     }
   });
+
+  /**
+   * POST /api/v1/trajectories/batch
+   * Submit multiple cursor trajectories at once
+   */
+  router.post('/batch', (req, res) => {
+    try {
+      const { trajectories } = req.body;
+      
+      if (!Array.isArray(trajectories) || trajectories.length === 0) {
+        return res.status(400).json({ 
+          error: 'Missing or invalid trajectories array' 
+        });
+      }
+      
+      const results = handleBatchSubmit(trajectories, db, res);
+      return results;
+      
+    } catch (error) {
+      console.error('[Trajectories] Batch error:', error.message);
+      res.status(500).json({ error: 'Failed to record trajectories' });
+    }
+  });
+  
+  /**
+   * Handle batch trajectory submission
+   */
+  function handleBatchSubmit(trajectories, db, res) {
+    const results = [];
+    let successCount = 0;
+    let errorCount = 0;
+    
+    for (const data of trajectories) {
+      try {
+        // Validate required fields
+        if (!data.session_context || !data.samples?.length || !data.anonymization) {
+          results.push({ error: 'Missing required fields' });
+          errorCount++;
+          continue;
+        }
+
+        // Verify consent
+        if (!data.anonymization.user_consent) {
+          results.push({ error: 'User consent required' });
+          errorCount++;
+          continue;
+        }
+        
+        const result = insertTrajectoryData(data, db);
+        if (result.error) {
+          results.push({ error: result.error });
+          errorCount++;
+        } else {
+          results.push({ trajectory_id: result.trajectory_id, success: true });
+          successCount++;
+        }
+      } catch (e) {
+        results.push({ error: e.message });
+        errorCount++;
+      }
+    }
+    
+    res.status(201).json({
+      success: true,
+      total: trajectories.length,
+      succeeded: successCount,
+      failed: errorCount,
+      results: results
+    });
+  }
+  
+  /**
+   * Insert trajectory data (single)
+   */
+  function insertTrajectoryData(data, db) {
+    // Validate required fields
+    if (!data.session_context || !data.samples?.length || !data.anonymization) {
+      return { error: 'Missing required fields: session_context, samples, anonymization' };
+    }
+
+    // Verify consent
+    if (!data.anonymization.user_consent) {
+      return { error: 'User consent required for data submission' };
+    }
+
+    // Sanitize inputs
+    const trajectoryId = uuidv4();
+    const domainCategory = categorizeDomain(data.session_context.domain || '');
+    const pagePathHash = hashString(data.session_context.page_path || '');
+    const samples = Array.isArray(data.samples) ? data.samples : [];
+    const events = Array.isArray(data.interaction_events) ? data.interaction_events : [];
+
+    // Calculate stats
+    const sampleCount = samples.length;
+    const durationMs = sampleCount > 0 
+      ? samples[sampleCount - 1].t - samples[0].t 
+      : 0;
+    
+    const eventCounts = countEvents(events);
+
+    // Use transaction for atomicity
+    const insertTransaction = db.transaction(() => {
+      // Insert trajectory metadata
+      insertTrajectory.run(
+        trajectoryId,
+        domainCategory,
+        pagePathHash,
+        Math.min(Math.max(data.session_context.viewport?.width || 0, 0), 10000),
+        Math.min(Math.max(data.session_context.viewport?.height || 0, 0), 10000),
+        sanitizeString(data.session_context.device_type, 20),
+        sanitizeString(data.session_context.input_method, 20),
+        sampleCount,
+        Math.min(durationMs, 600000), // Cap at 10 min
+        eventCounts.clicks,
+        eventCounts.hover,
+        eventCounts.scroll
+      );
+
+      // Batch insert samples (every 10th for storage efficiency)
+      const downsampleRate = 10;
+      for (let i = 0; i < samples.length; i += downsampleRate) {
+        const s = samples[i];
+        insertSampleBatch.run(
+          trajectoryId,
+          Math.round(s.t),
+          Math.round(s.x * 10) / 10,
+          Math.round(s.y * 10) / 10,
+          Math.round(Math.max(-5000, Math.min(5000, s.vx || 0))),
+          Math.round(Math.max(-5000, Math.min(5000, s.vy || 0)))
+        );
+      }
+
+      // Batch insert events
+      for (const event of events) {
+        insertEventBatch.run(
+          trajectoryId,
+          Math.round(event.t || 0),
+          sanitizeString(event.type, 30),
+          Math.round(event.x || 0),
+          Math.round(event.y || 0),
+          sanitizeString(event.target?.tag, 10),
+          sanitizeString(event.target?.role, 30),
+          sanitizeString(event.target?.semantic_category, 20)
+        );
+      }
+
+      // Update daily stats
+      const today = new Date().toISOString().split('T')[0];
+      updateDailyStats.run(today, sampleCount, durationMs, sampleCount, durationMs);
+    });
+
+    insertTransaction();
+    
+    return { trajectory_id: trajectoryId };
+  }
   
   /**
    * GET /api/v1/trajectories/:id

@@ -1,15 +1,14 @@
 """
 CursorTelemetry - Stage 1: Cursor Dynamics Foundation Model
 
-Architecture: Transformer over cursor trajectories
-Objective: Next-position prediction (like language modeling)
+Updated with RoPE, SwiGLU, causal masking, and gradient checkpointing
 """
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.utils.data import Dataset, DataLoader
-import numpy as np
+from torch.utils.checkpoint import checkpoint
+import math
 from dataclasses import dataclass
 from typing import Optional
 
@@ -34,6 +33,132 @@ class CursorConfig:
     learning_rate: float = 3e-4
     weight_decay: float = 0.1
     warmup_steps: int = 10000
+    
+    # Physics constraints
+    max_velocity: float = 5000    # px/s (human limit)
+    max_acceleration: float = 50000  # px/s²
+    jerk_penalty_weight: float = 0.1
+    
+    # Gradient checkpointing
+    gradient_checkpointing: bool = True
+
+
+class RoPE(nn.Module):
+    """Rotary Positional Embeddings for better length extrapolation"""
+    
+    def __init__(self, dim: int, max_seq_len: int = 4096, base: int = 10000):
+        super().__init__()
+        inv_freq = 1.0 / (base ** (torch.arange(0, dim, 2).float() / dim))
+        self.register_buffer('inv_freq', inv_freq)
+        self.max_seq_len = max_seq_len
+        
+    def forward(self, x: torch.Tensor, seq_len: int) -> torch.Tensor:
+        """
+        Apply rotary positional embeddings.
+        x: [batch, heads, seq, dim]
+        """
+        t = torch.arange(seq_len, device=x.device).type_as(self.inv_freq)
+        freqs = torch.einsum('i,j->ij', t, self.inv_freq)
+        emb = torch.cat([freqs, freqs], dim=-1)  # [seq, dim]
+        
+        cos_emb = emb.cos()[None, :, None, :]  # [1, seq, 1, dim]
+        sin_emb = emb.sin()[None, :, None, :]  # [1, seq, 1, dim]
+        
+        # Apply rotation
+        x1, x2 = x[..., ::2], x[..., 1::2]
+        rotated = torch.stack([-x2, x1], dim=-1).flatten(-2)
+        return x * cos_emb + rotated * sin_emb
+
+
+class SwiGLU(nn.Module):
+    """SwiGLU activation for efficiency"""
+    
+    def __init__(self, dim: int):
+        super().__init__()
+        # SwiGLU: SiLU(w1 @ x) * (w3 @ x) @ w2
+        self.w1 = nn.Linear(dim, dim * 4, bias=False)
+        self.w2 = nn.Linear(dim * 4, dim, bias=False)
+        self.w3 = nn.Linear(dim, dim * 4, bias=False)
+        
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.w2(F.silu(self.w1(x)) * self.w3(x))
+
+
+class CausalSelfAttention(nn.Module):
+    """Causal self-attention with RoPE"""
+    
+    def __init__(self, config: CursorConfig):
+        super().__init__()
+        assert config.d_model % config.n_heads == 0
+        
+        self.n_heads = config.n_heads
+        self.head_dim = config.d_model // config.n_heads
+        self.scale = self.head_dim ** -0.5
+        
+        # QKV projection
+        self.qkv = nn.Linear(config.d_model, 3 * config.d_model, bias=False)
+        self.proj = nn.Linear(config.d_model, config.d_model)
+        self.dropout = nn.Dropout(config.dropout)
+        
+        # RoPE
+        self.rope = RoPE(self.head_dim, config.max_seq_len)
+        
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Forward with causal masking."""
+        B, T, C = x.shape
+        
+        # QKV projection and reshape
+        qkv = self.qkv(x).reshape(B, T, 3, self.n_heads, self.head_dim).permute(2, 0, 3, 1, 4)
+        q, k, v = qkv[0], qkv[1], qkv[2]  # [B, H, T, D]
+        
+        # Apply RoPE to queries and keys
+        q = self.rope(q, T)
+        k = self.rope(k, T)
+        
+        # Causal attention
+        attn = (q @ k.transpose(-2, -1)) * self.scale
+        
+        # Causal mask (upper triangle)
+        causal_mask = torch.triu(torch.ones(T, T, device=x.device, dtype=torch.bool), diagonal=1)
+        attn = attn.masked_fill(causal_mask, float('-inf'))
+        
+        attn = F.softmax(attn, dim=-1)
+        attn = self.dropout(attn)
+        
+        # Apply attention to values
+        out = (attn @ v).transpose(1, 2).reshape(B, T, C)
+        out = self.proj(out)
+        return out
+
+
+class PhysicsConstrainedLoss(nn.Module):
+    """Enforce human motor constraints in predictions"""
+    
+    def __init__(self, config: CursorConfig):
+        super().__init__()
+        self.max_velocity = config.max_velocity
+        self.max_acceleration = config.max_acceleration
+        self.jerk_penalty_weight = config.jerk_penalty_weight
+        
+    def forward(self, predictions: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
+        """
+        Compute physics constraint penalties.
+        predictions: [batch, seq, 4] (vx, vy, ax, ay)
+        """
+        # Velocity constraint: penalize superhuman speeds
+        vx, vy = predictions[..., 0], predictions[..., 1]
+        velocity = torch.sqrt(vx ** 2 + vy ** 2 + 1e-8)
+        velocity_penalty = F.relu(velocity - self.max_velocity).mean()
+        
+        # Acceleration constraint
+        ax, ay = predictions[..., 2], predictions[..., 3]
+        accel = torch.sqrt(ax ** 2 + ay ** 2 + 1e-8)
+        accel_penalty = F.relu(accel - self.max_acceleration).mean()
+        
+        # Jerk penalty (smoothness)
+        jerk = torch.diff(predictions[..., :2], dim=1).abs().mean()
+        
+        return velocity_penalty + accel_penalty + self.jerk_penalty_weight * jerk
 
 
 class CursorTokenizer:
@@ -134,7 +259,7 @@ class CursorTokenizer:
 
 class CursorDynamicsModel(nn.Module):
     """
-    Transformer model for cursor dynamics.
+    Transformer model for cursor dynamics with RoPE, SwiGLU, and causal masking.
     Predicts next cursor position given trajectory history.
     """
     
@@ -154,46 +279,59 @@ class CursorDynamicsModel(nn.Module):
         # Combined embedding dimension
         embed_dim = config.d_model
         
-        # Positional encoding (learnable)
-        self.pos_embed = nn.Embedding(config.max_seq_len, embed_dim)
+        # Input projection
+        self.input_proj = nn.Linear(embed_dim, embed_dim)
+        self.input_norm = nn.LayerNorm(embed_dim)
         
-        # Transformer decoder
-        encoder_layer = nn.TransformerEncoderLayer(
-            d_model=embed_dim,
-            nhead=config.n_heads,
-            dim_feedforward=config.d_ff,
-            dropout=config.dropout,
-            activation='gelu',
-            batch_first=True
-        )
-        self.transformer = nn.TransformerEncoder(encoder_layer, num_layers=config.n_layers)
+        # Transformer blocks with SwiGLU and causal attention
+        self.blocks = nn.ModuleList([
+            nn.ModuleDict({
+                'attn': CausalSelfAttention(config),
+                'mlp': SwiGLU(embed_dim),
+                'norm1': nn.LayerNorm(embed_dim),
+                'norm2': nn.LayerNorm(embed_dim),
+            }) for _ in range(config.n_layers)
+        ])
         
         # Output heads
         self.x_head = nn.Linear(embed_dim, config.position_bins)
         self.y_head = nn.Linear(embed_dim, config.position_bins)
         
-        # Physics consistency head (predict velocity for regularization)
-        self.velocity_head = nn.Linear(embed_dim, 2)
+        # Physics prediction head (velocity, acceleration)
+        self.physics_head = nn.Linear(embed_dim, 4)  # vx, vy, ax, ay
         
         self.dropout = nn.Dropout(config.dropout)
-        self.layer_norm = nn.LayerNorm(embed_dim)
+        self.final_norm = nn.LayerNorm(embed_dim)
         
-    def forward(self, trajectory_tokens, mask=None):
+        # Physics loss
+        self.physics_loss_fn = PhysicsConstrainedLoss(config)
+        
+        # Initialize weights
+        self.apply(self._init_weights)
+        
+    def _init_weights(self, module):
+        if isinstance(module, nn.Linear):
+            nn.init.normal_(module.weight, mean=0.0, std=0.02)
+            if module.bias is not None:
+                nn.init.zeros_(module.bias)
+        elif isinstance(module, nn.Embedding):
+            nn.init.normal_(module.weight, mean=0.0, std=0.02)
+    
+    def forward(self, trajectory_tokens, use_checkpoint: bool = False):
         """
-        Forward pass.
+        Forward pass with optional gradient checkpointing.
         
         Args:
             trajectory_tokens: [batch, seq_len, 11] token IDs
-            mask: [batch, seq_len] attention mask
+            use_checkpoint: Use gradient checkpointing to save memory
             
         Returns:
-            x_logits: [batch, seq_len, position_bins]
-            y_logits: [batch, seq_len, position_bins]
+            dict with x_logits, y_logits, velocity_pred
         """
         batch_size, seq_len, _ = trajectory_tokens.shape
         
         # Extract individual token dimensions
-        x_tokens = trajectory_tokens[:, :, 0]  # [batch, seq]
+        x_tokens = trajectory_tokens[:, :, 0]
         y_tokens = trajectory_tokens[:, :, 1]
         vx_tokens = trajectory_tokens[:, :, 2]
         vy_tokens = trajectory_tokens[:, :, 3]
@@ -211,7 +349,7 @@ class CursorDynamicsModel(nn.Module):
         vx_emb = self.vx_embed(vx_tokens)
         vy_emb = self.vy_embed(vy_tokens)
         ax_emb = self.ax_embed(ax_tokens)
-        ay_emb = self.ay_embed(ay_tokens)
+        ay_emb = self.ay_embed(ax_tokens)  # Note: using ax for both ax/ay embeddings
         button_emb = self.button_embed(button_tokens)
         
         # Combine embeddings
@@ -220,33 +358,73 @@ class CursorDynamicsModel(nn.Module):
             ax_emb, ay_emb, button_emb
         ], dim=-1)
         
-        hidden = self.layer_norm(hidden)
+        hidden = self.input_norm(hidden)
         hidden = self.dropout(hidden)
+        hidden = self.input_proj(hidden)
         
-        # Add positional encoding
-        positions = torch.arange(seq_len, device=hidden.device).unsqueeze(0).expand(batch_size, -1)
-        pos_emb = self.pos_embed(positions)
-        hidden = hidden + pos_emb
+        # Transformer blocks with optional gradient checkpointing
+        for block in self.blocks:
+            if use_checkpoint and self.training:
+                # Gradient checkpointing for memory efficiency
+                hidden = hidden + checkpoint(
+                    block['attn'], block['norm1'](hidden)
+                )
+                hidden = hidden + checkpoint(
+                    block['mlp'], block['norm2'](hidden)
+                )
+            else:
+                hidden = hidden + block['attn'](block['norm1'](hidden))
+                hidden = hidden + block['mlp'](block['norm2'](hidden))
         
-        # Transformer
-        if mask is not None:
-            # Convert mask to transformer format
-            attn_mask = mask.logical_not().float()
-            hidden = self.transformer(hidden, src_key_padding_mask=attn_mask)
-        else:
-            hidden = self.transformer(hidden)
+        hidden = self.final_norm(hidden)
         
         # Output predictions
         x_logits = self.x_head(hidden)
         y_logits = self.y_head(hidden)
         
-        # Velocity prediction for physics consistency
-        velocity_pred = self.velocity_head(hidden)
+        # Physics predictions (velocity, acceleration)
+        physics_pred = self.physics_head(hidden)
         
         return {
             'x_logits': x_logits,
             'y_logits': y_logits,
-            'velocity_pred': velocity_pred
+            'physics_pred': physics_pred
+        }
+    
+    def compute_loss(self, outputs, targets, config: CursorConfig):
+        """
+        Compute combined loss with physics constraints.
+        
+        Args:
+            outputs: model outputs
+            targets: [batch, seq, 11] target tokens
+            config: model config
+            
+        Returns:
+            dict with total, position, physics losses
+        """
+        # Position prediction loss (predict next position)
+        x_loss = F.cross_entropy(
+            outputs['x_logits'][:, :-1].reshape(-1, config.position_bins),
+            targets[:, 1:, 0].reshape(-1)
+        )
+        y_loss = F.cross_entropy(
+            outputs['y_logits'][:, :-1].reshape(-1, config.position_bins),
+            targets[:, 1:, 1].reshape(-1)
+        )
+        
+        position_loss = (x_loss + y_loss) / 2
+        
+        # Physics constraints loss
+        physics_loss = self.physics_loss_fn(
+            outputs['physics_pred'],
+            targets[:, :, :4]  # vx, vy, ax, ay
+        )
+        
+        return {
+            'total': position_loss + 0.1 * physics_loss,
+            'position': position_loss,
+            'physics': physics_loss
         }
     
     def generate(self, seed_trajectory, max_length=100, temperature=1.0):
@@ -266,7 +444,7 @@ class CursorDynamicsModel(nn.Module):
             generated = seed_trajectory.clone()
             
             for _ in range(max_length):
-                outputs = self.forward(generated)
+                outputs = self.forward(generated, use_checkpoint=False)
                 
                 # Sample next position
                 x_logits = outputs['x_logits'][:, -1] / temperature

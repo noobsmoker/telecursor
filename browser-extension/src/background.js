@@ -1,32 +1,56 @@
 /**
  * CursorTelemetry - Background Service Worker
  * 
- * Manages extension lifecycle, stores data, handles sync.
+ * Manages extension lifecycle, stores data, handles sync, uploads to server.
  * 
- * @version 0.1.0
+ * @version 0.2.0
  */
+
+// Configuration
+const CONFIG = {
+  serverUrl: 'http://localhost:3000/api/v1/trajectories',
+  batchSize: 10,  // Trajectories per batch upload
+  uploadInterval: 60000,  // 1 minute
+  maxRetries: 3,
+  retryDelay: 5000
+};
 
 // State
 let currentTracker = null;
 let isEnabled = false;
+let uploadQueue = [];
+let isUploading = false;
 let settings = {
   sampleRate: 50,
   epsilon: 3.0,
   maxSessionDuration: 600000,
   includeDOMContext: true,
   siteAllowlist: [],
-  siteBlocklist: []
+  siteBlocklist: [],
+  serverUrl: null
 };
 
 // Initialize
 chrome.runtime.onInstalled.addListener(() => {
   console.log('[CursorTelemetry] Extension installed');
   loadSettings();
+  
+  // Schedule periodic upload
+  chrome.alarms.create('upload-trajectories', {
+    periodInMinutes: 1
+  });
 });
 
 chrome.runtime.onStartup.addListener(() => {
   console.log('[CursorTelemetry] Extension started');
   loadSettings();
+});
+
+// Alarm handler for periodic upload
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name === 'upload-trajectories') {
+    processUploadQueue();
+  }
 });
 
 // Load settings from storage
@@ -131,7 +155,13 @@ async function handleSessionData(data) {
     events: data.interaction_events.length
   });
   
-  // Store locally
+  // Validate data
+  if (!validateTrajectory(data)) {
+    console.error('[CursorTelemetry] Invalid trajectory data');
+    return;
+  }
+  
+  // Store locally as backup
   const storageKey = `session_${data.trajectory_id}`;
   await chrome.storage.local.set({ [storageKey]: data });
   
@@ -140,11 +170,43 @@ async function handleSessionData(data) {
   stats.totalSessions += 1;
   stats.totalSamples += data.samples.length;
   stats.totalDuration += (data.samples[data.samples.length - 1]?.t || 0);
+  stats.lastUpdated = Date.now();
   
   await chrome.storage.local.set({ stats });
   
-  // In future: upload to server (with user consent)
-  // await uploadSession(data);
+  // Check consent before adding to upload queue
+  if (!data.anonymization?.user_consent) {
+    console.log('[CursorTelemetry] No consent, storing locally only');
+    return;
+  }
+  
+  // Add to upload queue
+  uploadQueue.push({
+    data: data,
+    retries: 0,
+    timestamp: Date.now()
+  });
+  
+  console.log('[CursorTelemetry] Added to upload queue, queue size:', uploadQueue.length);
+  
+  // Try immediate upload if queue is large enough
+  if (uploadQueue.length >= CONFIG.batchSize) {
+    await processUploadQueue();
+  }
+}
+
+function validateTrajectory(data) {
+  // Basic validation
+  if (!data.trajectory_id || !data.samples || data.samples.length < 10) {
+    return false;
+  }
+  
+  // Check for required fields
+  if (!data.session_context || !data.anonymization) {
+    return false;
+  }
+  
+  return true;
 }
 
 // Get aggregated stats
@@ -158,31 +220,91 @@ async function getStats() {
   };
 }
 
-// Upload session to server (future)
-async function uploadSession(data) {
-  // Server endpoint would be configured in settings
-  const serverUrl = settings.serverUrl;
-  if (!serverUrl) return;
-  
-  // Check consent
-  if (!data.anonymization.user_consent) {
-    console.log('[CursorTelemetry] No consent, skipping upload');
+// Process upload queue - batch upload to server
+async function processUploadQueue() {
+  if (isUploading || uploadQueue.length === 0) {
     return;
   }
   
+  // Get server URL from settings
+  const { settings: storedSettings } = await chrome.storage.local.get('settings');
+  const serverUrl = (storedSettings && storedSettings.serverUrl) || CONFIG.serverUrl;
+  
+  if (!serverUrl) {
+    console.log('[CursorTelemetry] No server configured, skipping upload');
+    return;
+  }
+  
+  isUploading = true;
+  console.log('[CursorTelemetry] Processing upload queue, size:', uploadQueue.length);
+  
+  // Get batch to upload
+  const batch = uploadQueue.splice(0, CONFIG.batchSize);
+  
   try {
-    const response = await fetch(serverUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify(data)
-    });
+    const response = await uploadBatch(batch, serverUrl);
     
-    console.log('[CursorTelemetry] Upload response:', response.status);
-  } catch (err) {
-    console.error('[CursorTelemetry] Upload failed:', err);
+    if (response.ok) {
+      console.log(`[CursorTelemetry] Successfully uploaded ${batch.length} trajectories`);
+      
+      // Clear uploaded from local storage
+      for (const item of batch) {
+        await chrome.storage.local.remove(`session_${item.data.trajectory_id}`);
+      }
+      
+      // Update upload stats
+      const stats = await getStats();
+      stats.totalUploaded = (stats.totalUploaded || 0) + batch.length;
+      await chrome.storage.local.set({ stats });
+    } else {
+      // Re-queue on failure
+      console.error('[CursorTelemetry] Upload failed with status:', response.status);
+      requeueBatch(batch);
+    }
+  } catch (error) {
+    console.error('[CursorTelemetry] Upload error:', error);
+    // Re-queue all on error
+    requeueBatch(batch);
+  }
+  
+  isUploading = false;
+}
+
+function requeueBatch(batch) {
+  for (const item of batch) {
+    if (item.retries < CONFIG.maxRetries) {
+      item.retries++;
+      item.timestamp = Date.now();
+      uploadQueue.push(item);
+      console.log('[CursorTelemetry] Re-queued item, retry:', item.retries);
+    } else {
+      console.log('[CursorTelemetry] Dropped item after max retries');
+    }
   }
 }
 
-console.log('[CursorTelemetry] Background service worker loaded');
+async function uploadBatch(batch, serverUrl) {
+  const trajectories = batch.map(item => item.data);
+  
+  return fetch(serverUrl, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Telemetry-Consent': 'true',
+      'X-Client-Version': chrome.runtime.getManifest().version
+    },
+    body: JSON.stringify({ trajectories })
+  });
+}
+
+// Debug helper
+function debugUploadQueue() {
+  console.log('Upload queue:', uploadQueue);
+  console.log('Queue length:', uploadQueue.length);
+  console.log('Is uploading:', isUploading);
+}
+
+// Expose for debugging
+window.debugUploadQueue = debugUploadQueue;
+
+console.log('[CursorTelemetry] Background service worker loaded v0.2.0');
