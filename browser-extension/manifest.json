@@ -1,14 +1,19 @@
 {
   "manifest_version": 3,
-  "name": "CursorTelemetry (Open Dataset Contributor)",
-  "version": "0.1.0",
+  "name": "CursorTelemetry",
+  "version": "0.2.0",
   "description": "Contribute anonymized cursor behavior to open research dataset for human-computer interaction research",
   "permissions": [
     "storage",
     "activeTab"
   ],
+  "optional_permissions": [
+    "clipboardWrite",
+    "downloads"
+  ],
   "host_permissions": [
-    "<all_urls>"
+    "http://localhost:3000/*",
+    "https://api.telecursor.ai/*"
   ],
   "background": {
     "service_worker": "src/background.js",
@@ -18,27 +23,33 @@
     {
       "matches": ["<all_urls>"],
       "js": ["src/content.js"],
-      "run_at": "document_start"
+      "run_at": "document_start",
+      "world": "MAIN"
     }
   ],
   "action": {
     "default_popup": "src/popup/popup.html",
     "default_icon": {
-      "16": "icons/icon16.png",
-      "48": "icons/icon48.png",
-      "128": "icons/icon128.png"
+      "16": "icons/icon16.svg",
+      "48": "icons/icon16.svg",
+      "128": "icons/icon16.svg"
     }
   },
   "options_page": "src/options/options.html",
   "icons": {
-    "16": "icons/icon16.png",
-    "48": "icons/icon48.png",
-    "128": "icons/icon128.png"
+    "16": "icons/icon16.svg",
+    "48": "icons/icon16.svg",
+    "128": "icons/icon16.svg"
   },
   "web_accessible_resources": [
     {
       "resources": ["icons/*"],
       "matches": ["<all_urls>"]
     }
-  ]
+  ],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self'; connect-src 'self' http://localhost:3000 https://api.telecursor.ai"
+  },
+  "offline_enabled": false,
+  "minimum_chrome_version": "109"
 }

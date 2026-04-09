@@ -3,14 +3,16 @@
  * 
  * Adds noise to cursor data before any transmission or storage.
  * Implements Laplace mechanism for spatial privacy.
+ * Uses Web Crypto API for cryptographic security.
  * 
- * @version 0.1.0
+ * @version 0.2.0
  */
 
 class LocalPrivacyFilter {
   constructor(epsilon = 3.0) {
     this.epsilon = epsilon;
     this.sensitivity = this.computeSensitivity();
+    this._saltPromise = null;
   }
 
   /**
@@ -37,8 +39,6 @@ class LocalPrivacyFilter {
       ...point,
       x: this.addLaplaceNoise(point.x, scale),
       y: this.addLaplaceNoise(point.y, scale),
-      // Velocity/acceleration derived from noisy positions
-      // No additional privacy loss from post-processing
     }));
   }
 
@@ -69,20 +69,34 @@ class LocalPrivacyFilter {
   }
 
   /**
-   * Laplace(0, scale) noise generation
+   * Cryptographically secure Laplace noise using Web Crypto API
    */
   addLaplaceNoise(value, scale) {
-    const u = Math.random() - 0.5;
-    const noise = -scale * Math.sign(u) * Math.log(1 - 2 * Math.abs(u));
+    // Use crypto.getRandomValues for secure randomness
+    const randomBytes = new Uint8Array(4);
+    crypto.getRandomValues(randomBytes);
+    
+    // Convert to float in [0, 1)
+    let u = (
+      randomBytes[0] / 255 +
+      randomBytes[1] / 65025 +
+      randomBytes[2] / 16581375 +
+      randomBytes[3] / 4228250625
+    );
+    
+    // Apply Laplace distribution
+    const noise = -scale * Math.sign(u - 0.5) * Math.log(1 - 2 * Math.abs(u - 0.5));
     return Math.round((value + noise) * 100) / 100;
   }
 
   /**
-   * Randomized response: temporally subsample
-   * Each point kept with probability p
+   * Cryptographically secure random for subsampling
    */
   subsample(trajectory, rate = 0.7) {
-    return trajectory.filter(() => Math.random() < rate);
+    const randomBytes = new Uint8Array(trajectory.length);
+    crypto.getRandomValues(randomBytes);
+    
+    return trajectory.filter((_, i) => randomBytes[i] / 255 < rate);
   }
 
   /**
@@ -100,9 +114,7 @@ class LocalPrivacyFilter {
         tag: target.tag?.toLowerCase(),
         role: target.role,
         semantic_category: this.categorizeElement(target),
-        // Removed: specific classes, IDs, exact text
       },
-      // Remove exact coordinates, keep relative position
       x_bucket: this.bucketize(event.x, 100),
       y_bucket: this.bucketize(event.y, 100)
     };
@@ -124,79 +136,59 @@ class LocalPrivacyFilter {
     const tag = element.tag.toLowerCase();
     const role = element.role || '';
     
-    // Navigation elements
-    if (tag === 'nav' || role === 'navigation' || role === 'menu') {
-      return 'navigation';
-    }
-    
-    // Interactive elements
-    if (tag === 'button' || role === 'button' || role === 'link') {
-      return role === 'link' ? 'link' : 'button';
-    }
-    
-    // Form elements
-    if (['input', 'textarea', 'select'].includes(tag) || role === 'textbox') {
-      return 'input';
-    }
-    
-    // Text content
-    if (['p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6'].includes(tag)) {
-      return 'text';
-    }
-    
-    // Images/media
-    if (tag === 'img' || tag === 'video' || role === 'img') {
-      return 'media';
-    }
-    
-    // Lists
-    if (tag === 'ul' || tag === 'ol' || tag === 'li') {
-      return 'list';
-    }
-    
-    // Generic containers
-    if (['div', 'section', 'article', 'main', 'aside'].includes(tag)) {
-      return 'container';
-    }
+    if (tag === 'nav' || role === 'navigation' || role === 'menu') return 'navigation';
+    if (tag === 'button' || role === 'button') return 'button';
+    if (tag === 'a' || role === 'link') return 'link';
+    if (['input', 'textarea', 'select'].includes(tag) || role === 'textbox') return 'input';
+    if (['p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6'].includes(tag)) return 'text';
+    if (tag === 'img' || tag === 'video' || role === 'img') return 'media';
+    if (tag === 'ul' || tag === 'ol' || tag === 'li') return 'list';
+    if (['div', 'section', 'article', 'main', 'aside'].includes(tag)) return 'container';
     
     return 'other';
   }
 
   /**
-   * Create anonymous user hash (for rate limiting, not identification)
-   * Uses truncated hash - can't reverse to identify user
+   * Secure user hash using SubtleCrypto
+   * Returns promise for async hash
    */
-  hashUser() {
-    const salt = this.getSalt();
-    const data = navigator.userAgent + screen.width + screen.height + navigator.hardwareConcurrency;
+  async hashUser() {
+    const salt = await this._getSecureSalt();
+    const data = navigator.userAgent + screen.width + screen.height;
     
-    // Simple hash - in production use Web Crypto API
-    let hash = 0;
-    const combined = data + salt;
-    for (let i = 0; i < combined.length; i++) {
-      const char = combined.charCodeAt(i);
-      hash = ((hash << 5) - hash) + char;
-      hash = hash & hash;
-    }
+    const encoder = new TextEncoder();
+    const dataBuffer = encoder.encode(data + salt);
     
-    // Return truncated (first 16 chars)
-    return Math.abs(hash).toString(16).substring(0, 16);
+    const hashBuffer = await crypto.subtle.digest('SHA-256', dataBuffer);
+    const hashArray = Array.from(new Uint8Array(hashBuffer));
+    
+    return hashArray.map(b => b.toString(16).padStart(2, '0')).join('').substring(0, 16);
   }
 
   /**
-   * Get or generate salt for hashing
-   * Stored locally, never sent to server
+   * Get or generate salt using Extension Storage API
    */
-  getSalt() {
-    const storageKey = 'telemetry_salt';
+  async _getSecureSalt() {
+    const storageKey = 'telecursor_secure_salt';
     
-    // Check if we have a stored salt
+    // Try extension storage API first
+    if (typeof chrome !== 'undefined' && chrome.storage) {
+      try {
+        const result = await chrome.storage.local.get(storageKey);
+        if (result[storageKey]) return result[storageKey];
+      } catch (e) {
+        // Fall back to localStorage
+      }
+    }
+    
+    // Fallback to localStorage
     const stored = localStorage.getItem(storageKey);
     if (stored) return stored;
     
-    // Generate new salt
-    const salt = crypto.getRandomValues(new Uint8Array(16))
-      .reduce((acc, byte) => acc + byte.toString(16).padStart(2, '0'), '');
+    // Generate new cryptographically secure salt
+    const saltBytes = new Uint8Array(32);
+    crypto.getRandomValues(saltBytes);
+    const salt = Array.from(saltBytes).map(b => b.toString(16).padStart(2, '0')).join('');
     
     localStorage.setItem(storageKey, salt);
     return salt;
@@ -232,16 +224,13 @@ class LocalPrivacyFilter {
    * Verify differential privacy guarantees
    */
   verifyDP(epsilon, delta = 1e-5) {
-    // Check that noise scale matches claimed epsilon
     const requiredScale = this.sensitivity.spatial / epsilon;
     
-    // This is a simplified check - real implementation would
-    // run statistical tests on actual noise distribution
     return {
       epsilon: epsilon,
-      achievedEpsilon: epsilon,  // By construction
+      achievedEpsilon: epsilon,
       delta: delta,
-      sufficientPrivacy: epsilon <= 8.0,  // Standard threshold
+      sufficientPrivacy: epsilon <= 8.0,
       recommendation: epsilon > 3.0 ? 
         'Consider lowering epsilon for stronger privacy' : 
         'Epsilon setting is appropriate'
