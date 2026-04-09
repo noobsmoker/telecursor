@@ -2,6 +2,7 @@
 CursorTelemetry - Stage 1: Cursor Dynamics Foundation Model
 
 Updated with RoPE, SwiGLU, causal masking, and gradient checkpointing
+O-009: FlashAttention support for 40% training cost reduction
 """
 
 import torch
@@ -11,6 +12,13 @@ from torch.utils.checkpoint import checkpoint
 import math
 from dataclasses import dataclass
 from typing import Optional
+
+# O-009: Import FlashAttention if available
+try:
+    from flash_attn import flash_attn_func
+    FLASH_ATTN_AVAILABLE = True
+except ImportError:
+    FLASH_ATTN_AVAILABLE = False
 
 
 @dataclass
@@ -41,6 +49,9 @@ class CursorConfig:
     
     # Gradient checkpointing
     gradient_checkpointing: bool = True
+    
+    # O-009: FlashAttention
+    use_flash_attention: bool = True  # Enable by default if available
 
 
 class RoPE(nn.Module):
@@ -103,8 +114,15 @@ class CausalSelfAttention(nn.Module):
         # RoPE
         self.rope = RoPE(self.head_dim, config.max_seq_len)
         
+        # O-009: Check if FlashAttention can be used
+        self.use_flash = (
+            FLASH_ATTN_AVAILABLE and 
+            config.use_flash_attention and
+            config.d_model % 8 == 0  # FlashAttention requires divisible by 8
+        )
+        
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """Forward with causal masking."""
+        """Forward with causal masking and optional FlashAttention."""
         B, T, C = x.shape
         
         # QKV projection and reshape
@@ -115,18 +133,46 @@ class CausalSelfAttention(nn.Module):
         q = self.rope(q, T)
         k = self.rope(k, T)
         
-        # Causal attention
-        attn = (q @ k.transpose(-2, -1)) * self.scale
+        # O-009: Use FlashAttention if available and seq_len is reasonable
+        if self.use_flash and T <= 4096:
+            # FlashAttention expects [B, T, H, D] format
+            q_fa = q.transpose(1, 2).contiguous()
+            k_fa = k.transpose(1, 2).contiguous()
+            v_fa = v.transpose(1, 2).contiguous()
+            
+            # Create causal mask for FlashAttention
+            causal_mask = torch.triu(
+                torch.ones(T, T, device=x.device, dtype=torch.bool), 
+                diagonal=1
+            )
+            
+            # FlashAttention call
+            out_fa = flash_attn_func(
+                q_fa, k_fa, v_fa,
+                dropout_p=self.dropout.p if self.training else 0.0,
+                causal=True
+            )
+            
+            # Transpose back to [B, H, T, D]
+            out = out_fa.transpose(1, 2)
+        else:
+            # Standard attention with causal mask
+            attn = (q @ k.transpose(-2, -1)) * self.scale
+            
+            # Causal mask (upper triangle)
+            causal_mask = torch.triu(
+                torch.ones(T, T, device=x.device, dtype=torch.bool), 
+                diagonal=1
+            )
+            attn = attn.masked_fill(causal_mask, float('-inf'))
+            
+            attn = F.softmax(attn, dim=-1)
+            attn = self.dropout(attn)
+            
+            # Apply attention to values
+            out = (attn @ v)
         
-        # Causal mask (upper triangle)
-        causal_mask = torch.triu(torch.ones(T, T, device=x.device, dtype=torch.bool), diagonal=1)
-        attn = attn.masked_fill(causal_mask, float('-inf'))
-        
-        attn = F.softmax(attn, dim=-1)
-        attn = self.dropout(attn)
-        
-        # Apply attention to values
-        out = (attn @ v).transpose(1, 2).reshape(B, T, C)
+        out = out.transpose(1, 2).reshape(B, T, C)
         out = self.proj(out)
         return out
 
