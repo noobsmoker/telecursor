@@ -3,6 +3,7 @@
  * 
  * SQLite-based storage for cursor trajectory data.
  * Schema designed for privacy and efficient queries.
+ * Optimized with WAL mode and proper indexing.
  */
 
 import Database from 'better-sqlite3';
@@ -24,9 +25,13 @@ let db = null;
 export function initDatabase() {
   db = new Database(dbPath);
   
-  // Enable WAL mode for better concurrent performance
-  db.pragma('journal_mode = WAL');
-  db.pragma('synchronous = NORMAL');
+  // Performance optimizations
+  db.pragma('journal_mode = WAL');           // Better concurrent writes
+  db.pragma('synchronous = NORMAL');          // Balanced durability/speed
+  db.pragma('cache_size = -64000');          // 64MB cache
+  db.pragma('temp_store = MEMORY');          // Temp tables in memory
+  db.pragma('mmap_size = 268435456');         // 256MB memory-mapped I/O
+  db.pragma('busy_timeout = 5000');          // Wait 5s for locks
   
   // Create tables
   createTables();
@@ -52,13 +57,13 @@ function createTables() {
       input_method TEXT,
       
       -- Statistics (pre-aggregated, no raw data stored long-term)
-      sample_count INTEGER,
-      duration_ms INTEGER,
+      sample_count INTEGER DEFAULT 0,
+      duration_ms INTEGER DEFAULT 0,
       
       -- Interaction summary
-      click_count INTEGER,
-      hover_count INTEGER,
-      scroll_count INTEGER,
+      click_count INTEGER DEFAULT 0,
+      hover_count INTEGER DEFAULT 0,
+      scroll_count INTEGER DEFAULT 0,
       
       -- Privacy flags
       consent_verified INTEGER DEFAULT 0,
@@ -80,12 +85,10 @@ function createTables() {
       y REAL NOT NULL,
       vx REAL,
       vy REAL,
-      ax REAL,
-      ay REAL,
       button_state INTEGER,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       
-      FOREIGN KEY (trajectory_id) REFERENCES trajectories(id)
+      FOREIGN KEY (trajectory_id) REFERENCES trajectories(id) ON DELETE CASCADE
     )
   `);
   
@@ -100,11 +103,10 @@ function createTables() {
       y REAL,
       target_tag TEXT,
       target_role TEXT,
-      target_selector TEXT,
       target_category TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       
-      FOREIGN KEY (trajectory_id) REFERENCES trajectories(id)
+      FOREIGN KEY (trajectory_id) REFERENCES trajectories(id) ON DELETE CASCADE
     )
   `);
   
@@ -130,13 +132,22 @@ function createTables() {
     )
   `);
   
-  // Create indexes
+  // Create indexes for common queries
   db.exec(`
-    CREATE INDEX IF NOT EXISTS idx_trajectories_created ON trajectories(created_at);
+    CREATE INDEX IF NOT EXISTS idx_trajectories_created ON trajectories(created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_trajectories_domain ON trajectories(domain_category);
-    CREATE INDEX IF NOT EXISTS idx_trajectory_samples_trajectory ON trajectory_samples(trajectory_id);
-    CREATE INDEX IF NOT EXISTS idx_interaction_events_trajectory ON interaction_events(trajectory_id);
-    CREATE INDEX IF NOT EXISTS idx_daily_stats_date ON daily_stats(date);
+    CREATE INDEX IF NOT EXISTS idx_trajectories_device ON trajectories(device_type);
+    CREATE INDEX IF NOT EXISTS idx_trajectories_deleted ON trajectories(deleted_at);
+    CREATE INDEX IF NOT EXISTS idx_trajectories_consent ON trajectories(consent_verified);
+    CREATE INDEX IF NOT EXISTS idx_trajectories_samples ON trajectories(sample_count);
+    
+    CREATE INDEX IF NOT EXISTS idx_samples_trajectory ON trajectory_samples(trajectory_id);
+    CREATE INDEX IF NOT EXISTS idx_samples_time ON trajectory_samples(trajectory_id, t_ms);
+    
+    CREATE INDEX IF NOT EXISTS idx_events_trajectory ON interaction_events(trajectory_id);
+    CREATE INDEX IF NOT EXISTS idx_events_type ON interaction_events(event_type);
+    
+    CREATE INDEX IF NOT EXISTS idx_daily_stats_date ON daily_stats(date DESC);
   `);
   
   // Data retention policy - auto-delete after 90 days
@@ -147,6 +158,16 @@ function createTables() {
       DELETE FROM trajectories 
       WHERE created_at < datetime('now', '-90 days') 
       AND deleted_at IS NULL;
+    END
+  `);
+  
+  // Cascade delete for samples/events when trajectory deleted
+  db.exec(`
+    CREATE TRIGGER IF NOT EXISTS delete_trajectory_samples
+    AFTER DELETE ON trajectories
+    BEGIN
+      DELETE FROM trajectory_samples WHERE trajectory_id = OLD.id;
+      DELETE FROM interaction_events WHERE trajectory_id = OLD.id;
     END
   `);
 }
@@ -160,10 +181,25 @@ export function getDatabase() {
 
 export function closeDatabase() {
   if (db) {
+    // Checkpoint WAL before closing
+    db.pragma('wal_checkpoint(TRUNCATE)');
     db.close();
     db = null;
     console.log('[TeleCursor DB] Closed');
   }
 }
 
-export default { initDatabase, getDatabase, closeDatabase };
+// Export for debugging
+export function getDbStats() {
+  if (!db) return null;
+  
+  return db.prepare(`
+    SELECT 
+      (SELECT COUNT(*) FROM trajectories WHERE deleted_at IS NULL) as trajectories,
+      (SELECT COUNT(*) FROM trajectory_samples) as samples,
+      (SELECT COUNT(*) FROM interaction_events) as events,
+      (SELECT page_count * page_size as bytes_used FROM pragma_page_count(), pragma_page_size()) as db_size
+  `).get();
+}
+
+export default { initDatabase, getDatabase, closeDatabase, getDbStats };

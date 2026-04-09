@@ -3,9 +3,12 @@
  * 
  * Receives and stores cursor trajectory data from the browser extension.
  * Applies privacy-preserving transformations before storage.
+ * Optimized for production with compression and security headers.
  */
 
 import express from 'express';
+import compression from 'compression';
+import helmet from 'helmet';
 import { v4 as uuidv4 } from 'uuid';
 import { initDatabase } from './db/database.js';
 import { createTrajectoryRoutes } from './routes/trajectories.js';
@@ -47,57 +50,107 @@ const argv = yargs(process.argv.slice(2))
 
 const app = express();
 
-// Middleware
-app.use(express.json({ limit: argv.maxBodySize }));
+// Security middleware
+app.use(helmet({
+  contentSecurityPolicy: false, // Disable for API
+  crossOriginEmbedderPolicy: false
+}));
+
+// Compression for responses
+app.use(compression());
+
+// Body parsing with size limits
+app.use(express.json({ 
+  limit: argv.maxBodySize,
+  strict: false
+}));
+app.use(express.urlencoded({ 
+  extended: true,
+  limit: argv.maxBodySize
+}));
+
+// Request logging
 app.use(loggingMiddleware);
+
+// Rate limiting
 app.use(rateLimitMiddleware(argv.rateLimit));
 
 // CORS
 app.use((req, res, next) => {
   res.header('Access-Control-Allow-Origin', argv.corsOrigin);
   res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Telemetry-Consent');
+  res.header('Access-Control-Max-Age', '86400');
+  
   if (req.method === 'OPTIONS') {
-    return res.sendStatus(200);
+    return res.sendStatus(204);
   }
   next();
 });
 
-// Health check
+// Health check with basic system info
 app.get('/health', (req, res) => {
   res.json({ 
     status: 'ok', 
     timestamp: new Date().toISOString(),
-    version: '0.1.0'
+    version: '0.1.0',
+    uptime: process.uptime()
   });
 });
 
 // Initialize database
 const db = initDatabase();
 
-// Routes
+// API Routes
 app.use('/api/v1/trajectories', createTrajectoryRoutes(db));
 app.use('/api/v1/stats', createStatsRoutes(db));
 
-// Error handling
+// 404 handler
+app.use((req, res) => {
+  res.status(404).json({ error: 'Not found' });
+});
+
+// Global error handler
 app.use((err, req, res, next) => {
-  console.error('[TeleCursor Server] Error:', err);
+  console.error('[TeleCursor Server] Error:', err.message);
   
   if (err.type === 'entity.parse.failed') {
-    return res.status(400).json({ error: 'Invalid JSON' });
+    return res.status(400).json({ error: 'Invalid JSON in request body' });
   }
   
   if (err.code === 'LIMIT_FILE_SIZE') {
-    return res.status(413).json({ error: 'Payload too large' });
+    return res.status(413).json({ error: 'Request body too large' });
   }
   
-  res.status(500).json({ error: 'Internal server error' });
+  // Don't leak error details in production
+  res.status(500).json({ 
+    error: 'Internal server error',
+    requestId: req.headers['x-request-id'] || uuidv4()
+  });
 });
 
 // Start server
-app.listen(argv.port, argv.host, () => {
+const server = app.listen(argv.port, argv.host, () => {
   console.log(`[TeleCursor Server] Running on http://${argv.host}:${argv.port}`);
   console.log(`[TeleCursor Server] Rate limit: ${argv.rateLimit} req/min`);
+  console.log(`[TeleCursor Server] Max body: ${argv.maxBodySize / 1024 / 1024}MB`);
+});
+
+// Graceful shutdown
+process.on('SIGTERM', () => {
+  console.log('[TeleCursor Server] SIGTERM received, shutting down...');
+  server.close(() => {
+    console.log('[TeleCursor Server] HTTP server closed');
+    process.exit(0);
+  });
+});
+
+process.on('SIGINT', () => {
+  console.log('[TeleCursor Server] SIGINT received, shutting down...');
+  server.close(() => {
+    console.log('[TeleCursor Server] HTTP server closed');
+    process.exit(0);
+  });
 });
 
 export default app;
