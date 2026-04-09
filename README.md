@@ -27,6 +27,22 @@ TeleCursor creates a **public dataset** ("CursorNet") capturing the physics of h
 
 **Your dataset captures:** The physics of human attention and decision-making in the wild.
 
+## The Vision
+
+Once trained, TeleCursor models enable:
+
+| Application | How |
+|-------------|-----|
+| **Accessibility** | Predict where motor-impaired users want to click |
+| **UX Research** | A/B test layouts by simulating 10,000 user sessions |
+| **UI Generation** | Generate layouts optimized for natural cursor flow |
+| **Bot Detection** | Distinguish humans from automation |
+| **Frustration Detection** | Identify confusing UX before users complain |
+| **Autonomous Browsing** | Train agents that navigate like humans |
+
+---
+
+**This is a new field: computational behavioral HCI. The dataset itself becomes the contribution — models are just derivations.**
 ---
 
 ## Quick Start
@@ -166,22 +182,5 @@ We welcome contributions! See [governance/CONTRIBUTING.md](governance/CONTRIBUTI
 - **Data:** CC-BY-SA with privacy overlay
 
 ---
-
-## The Vision
-
-Once trained, TeleCursor models enable:
-
-| Application | How |
-|-------------|-----|
-| **Accessibility** | Predict where motor-impaired users want to click |
-| **UX Research** | A/B test layouts by simulating 10,000 user sessions |
-| **UI Generation** | Generate layouts optimized for natural cursor flow |
-| **Bot Detection** | Distinguish humans from automation |
-| **Frustration Detection** | Identify confusing UX before users complain |
-| **Autonomous Browsing** | Train agents that navigate like humans |
-
----
-
-**This is a new field: computational behavioral HCI. The dataset itself becomes the contribution — models are just derivations.**
 
 Join us at [telecursor.ai](https://telecursor.ai) | [GitHub](https://github.com/noobsmoker/telecursor)
