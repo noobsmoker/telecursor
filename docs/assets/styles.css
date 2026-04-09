@@ -1,0 +1,265 @@
+/* TeleCursor Documentation Styles */
+
+:root {
+  --primary: #667eea;
+  --primary-dark: #5a67d8;
+  --secondary: #764ba2;
+  --text: #2d3748;
+  --text-light: #718096;
+  --bg: #ffffff;
+  --bg-alt: #f7fafc;
+  --border: #e2e8f0;
+  --code-bg: #edf2f7;
+  --success: #48bb78;
+  --warning: #ed8936;
+  --danger: #f56565;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  line-height: 1.7;
+  color: var(--text);
+  background: var(--bg);
+  margin: 0;
+  padding: 0;
+}
+
+.container {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 0 24px;
+}
+
+/* Headers */
+h1, h2, h3, h4, h5, h6 {
+  color: var(--text);
+  margin-top: 2em;
+  margin-bottom: 0.75em;
+  font-weight: 700;
+  line-height: 1.3;
+}
+
+h1 {
+  font-size: 2.5rem;
+  margin-top: 0;
+  background: linear-gradient(135deg, var(--primary), var(--secondary));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+h2 {
+  font-size: 1.75rem;
+  padding-bottom: 0.5em;
+  border-bottom: 2px solid var(--border);
+}
+
+h3 {
+  font-size: 1.35rem;
+}
+
+/* Links */
+a {
+  color: var(--primary);
+  text-decoration: none;
+  transition: color 0.2s;
+}
+
+a:hover {
+  color: var(--primary-dark);
+  text-decoration: underline;
+}
+
+/* Code */
+code {
+  background: var(--code-bg);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-family: 'SF Mono', Monaco, 'Courier New', monospace;
+  font-size: 0.9em;
+  color: var(--secondary);
+}
+
+pre {
+  background: #1a202c;
+  color: #e2e8f0;
+  padding: 16px;
+  border-radius: 8px;
+  overflow-x: auto;
+  font-family: 'SF Mono', Monaco, 'Courier New', monospace;
+  font-size: 0.9em;
+  line-height: 1.5;
+}
+
+pre code {
+  background: none;
+  padding: 0;
+  color: inherit;
+}
+
+/* Tables */
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1.5em 0;
+}
+
+th, td {
+  padding: 12px 16px;
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+}
+
+th {
+  background: var(--bg-alt);
+  font-weight: 600;
+  color: var(--text);
+}
+
+tr:hover {
+  background: var(--bg-alt);
+}
+
+/* Cards Grid */
+.grid.cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 20px;
+  margin: 2em 0;
+}
+
+.card {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 24px;
+  transition: all 0.3s ease;
+}
+
+.card:hover {
+  border-color: var(--primary);
+  box-shadow: 0 4px 20px rgba(102, 126, 234, 0.15);
+  transform: translateY(-2px);
+}
+
+.card h3 {
+  margin-top: 0;
+  color: var(--primary);
+}
+
+/* Blockquotes */
+blockquote {
+  border-left: 4px solid var(--primary);
+  margin: 1.5em 0;
+  padding: 0.5em 1em;
+  background: var(--bg-alt);
+  font-style: italic;
+}
+
+/* Lists */
+ul, ol {
+  padding-left: 1.5em;
+}
+
+li {
+  margin: 0.5em 0;
+}
+
+/* Horizontal Rule */
+hr {
+  border: none;
+  height: 1px;
+  background: var(--border);
+  margin: 3em 0;
+}
+
+/* Badges */
+.badge {
+  display: inline-block;
+  padding: 4px 10px;
+  border-radius: 12px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.badge-success {
+  background: #c6f6d5;
+  color: #22543d;
+}
+
+.badge-warning {
+  background: #feebc8;
+  color: #744210;
+}
+
+.badge-danger {
+  background: #fed7d7;
+  color: #822727;
+}
+
+/* Callouts */
+.callout {
+  padding: 16px 20px;
+  border-radius: 8px;
+  margin: 1.5em 0;
+  border-left: 4px solid;
+}
+
+.callout-info {
+  background: #ebf8ff;
+  border-color: var(--primary);
+}
+
+.callout-success {
+  background: #f0fff4;
+  border-color: var(--success);
+}
+
+.callout-warning {
+  background: #fffaf0;
+  border-color: var(--warning);
+}
+
+.callout-danger {
+  background: #fff5f5;
+  border-color: var(--danger);
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+  h1 {
+    font-size: 2rem;
+  }
+  
+  h2 {
+    font-size: 1.5rem;
+  }
+  
+  .container {
+    padding: 0 16px;
+  }
+  
+  pre {
+    font-size: 0.8em;
+  }
+}
+
+/* Print */
+@media print {
+  body {
+    font-size: 12pt;
+  }
+  
+  a {
+    text-decoration: underline;
+  }
+  
+  pre {
+    white-space: pre-wrap;
+  }
+}
