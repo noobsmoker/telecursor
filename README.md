@@ -42,7 +42,7 @@ Once trained, TeleCursor models enable:
 
 ---
 
-**This is a new field: computational behavioral HCI. The dataset itself becomes the contribution — models are just derivations.**
+**This is computational behavioral HCI. The dataset itself becomes the contribution — models are just derivations.**
 ---
 
 ## Quick Start
