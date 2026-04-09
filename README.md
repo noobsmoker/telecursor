@@ -184,4 +184,4 @@ Once trained, TeleCursor models enable:
 
 **This is a new field: computational behavioral HCI. The dataset itself becomes the contribution — models are just derivations.**
 
-Join us at [telecursor.ai](https://telecursor.ai) | [GitHub](https://github.com/telecursor/telecursor)
+Join us at [telecursor.ai](https://telecursor.ai) | [GitHub](https://github.com/noobsmoker/telecursor)
