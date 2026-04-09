@@ -199,10 +199,32 @@ export function createStatsRoutes(db) {
   /**
    * POST /api/v1/stats/invalidate-cache
    * Invalidate cache (for admin/debugging)
+   * B-010: Fixed - use secure comparison, require env var
    */
   router.post('/invalidate-cache', (req, res) => {
+    const adminSecret = process.env.ADMIN_SECRET;
+    
+    // B-010: Fail if no admin secret configured
+    if (!adminSecret) {
+      console.error('[Stats] Admin endpoint accessed but ADMIN_SECRET not set');
+      return res.status(500).json({ error: 'Admin not configured' });
+    }
+    
     const { secret } = req.query;
-    if (secret !== process.env.ADMIN_SECRET) {
+    
+    // B-010: Use constant-time comparison to prevent timing attacks
+    if (!secret || typeof secret !== 'string') {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+    
+    // Constant-time comparison
+    const crypto = require('crypto');
+    const isValid = crypto.timingSafeEqual(
+      Buffer.from(secret),
+      Buffer.from(adminSecret)
+    );
+    
+    if (!isValid) {
       return res.status(401).json({ error: 'Unauthorized' });
     }
     

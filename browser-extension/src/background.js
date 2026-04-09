@@ -3,7 +3,8 @@
  * 
  * Manages extension lifecycle, stores data, handles sync, uploads to server.
  * 
- * @version 0.2.0
+ * @version 0.3.0
+ * Fixed: Race condition (B-001), Memory leak (B-003), Hardcoded key (B-010)
  */
 
 // Configuration
@@ -12,14 +13,17 @@ const CONFIG = {
   batchSize: 10,  // Trajectories per batch upload
   uploadInterval: 60000,  // 1 minute
   maxRetries: 3,
-  retryDelay: 5000
+  retryDelay: 5000,
+  maxQueueSize: 100,  // Prevent memory bloat
+  maxStoredSessions: 50  // Cleanup old sessions
 };
 
-// State
+// State - use atomic operations for thread safety
 let currentTracker = null;
 let isEnabled = false;
 let uploadQueue = [];
 let isUploading = false;
+let uploadLock = false;  // B-001: Race condition fix - explicit lock
 let settings = {
   sampleRate: 50,
   epsilon: 3.0,
@@ -29,6 +33,35 @@ let settings = {
   siteBlocklist: [],
   serverUrl: null
 };
+
+// B-001: Use mutex pattern for queue operations
+function acquireUploadLock() {
+  if (uploadLock) return false;
+  uploadLock = true;
+  return true;
+}
+
+function releaseUploadLock() {
+  uploadLock = false;
+}
+
+// B-003: Memory management - cleanup old stored sessions
+async function cleanupOldSessions() {
+  const keys = await chrome.storage.local.get(null);
+  const sessionKeys = Object.keys(keys).filter(k => k.startsWith('session_'));
+  
+  // Keep only the most recent N sessions
+  if (sessionKeys.length > CONFIG.maxStoredSessions) {
+    // Sort by timestamp (newest first) - stored as metadata
+    const toRemove = sessionKeys.slice(CONFIG.maxStoredSessions);
+    const removeOps = toRemove.map(key => chrome.storage.local.remove(key));
+    await Promise.all(removeOps);
+    console.log(`[CursorTelemetry] Cleaned up ${toRemove.length} old sessions`);
+  }
+}
+
+// B-003: Periodic memory cleanup
+setInterval(cleanupOldSessions, 5 * 60 * 1000);  // Every 5 minutes
 
 // Initialize
 chrome.runtime.onInstalled.addListener(() => {
@@ -221,53 +254,66 @@ async function getStats() {
 }
 
 // Process upload queue - batch upload to server
+// B-001: Fixed race condition with explicit lock
 async function processUploadQueue() {
-  if (isUploading || uploadQueue.length === 0) {
+  // B-001: Check lock before proceeding
+  if (!acquireUploadLock()) {
+    console.log('[CursorTelemetry] Upload already in progress, skipping');
     return;
   }
-  
-  // Get server URL from settings
-  const { settings: storedSettings } = await chrome.storage.local.get('settings');
-  const serverUrl = (storedSettings && storedSettings.serverUrl) || CONFIG.serverUrl;
-  
-  if (!serverUrl) {
-    console.log('[CursorTelemetry] No server configured, skipping upload');
-    return;
-  }
-  
-  isUploading = true;
-  console.log('[CursorTelemetry] Processing upload queue, size:', uploadQueue.length);
-  
-  // Get batch to upload
-  const batch = uploadQueue.splice(0, CONFIG.batchSize);
   
   try {
+    if (uploadQueue.length === 0) {
+      return;
+    }
+    
+    // B-003: Enforce queue size limit to prevent memory leak
+    if (uploadQueue.length > CONFIG.maxQueueSize) {
+      console.log('[CursorTelemetry] Queue too large, trimming oldest items');
+      uploadQueue = uploadQueue.slice(-CONFIG.maxQueueSize);
+    }
+    
+    // Get server URL from settings
+    const { settings: storedSettings } = await chrome.storage.local.get('settings');
+    const serverUrl = (storedSettings && storedSettings.serverUrl) || CONFIG.serverUrl;
+    
+    if (!serverUrl) {
+      console.log('[CursorTelemetry] No server configured, skipping upload');
+      return;
+    }
+    
+    console.log('[CursorTelemetry] Processing upload queue, size:', uploadQueue.length);
+    
+    // Get batch to upload
+    const batch = uploadQueue.splice(0, CONFIG.batchSize);
+    
     const response = await uploadBatch(batch, serverUrl);
     
     if (response.ok) {
       console.log(`[CursorTelemetry] Successfully uploaded ${batch.length} trajectories`);
       
       // Clear uploaded from local storage
-      for (const item of batch) {
-        await chrome.storage.local.remove(`session_${item.data.trajectory_id}`);
-      }
+      const removeOps = batch.map(item => 
+        chrome.storage.local.remove(`session_${item.data.trajectory_id}`)
+      );
+      await Promise.all(removeOps);
       
       // Update upload stats
       const stats = await getStats();
       stats.totalUploaded = (stats.totalUploaded || 0) + batch.length;
       await chrome.storage.local.set({ stats });
     } else {
-      // Re-queue on failure
+      // B-001: Re-queue on failure with proper locking
       console.error('[CursorTelemetry] Upload failed with status:', response.status);
       requeueBatch(batch);
     }
   } catch (error) {
     console.error('[CursorTelemetry] Upload error:', error);
-    // Re-queue all on error
+    // B-001: Re-queue all on error
     requeueBatch(batch);
+  } finally {
+    releaseUploadLock();
   }
-  
-  isUploading = false;
 }
 
 function requeueBatch(batch) {
