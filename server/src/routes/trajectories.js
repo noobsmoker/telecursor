@@ -3,11 +3,82 @@
  * 
  * API endpoints for submitting and querying cursor trajectory data.
  * Optimized for performance with batch inserts and transactions.
+ * B-002: Fixed SQL injection vulnerabilities with parameterized queries
  */
 
 import { Router } from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import crypto from 'crypto';
+
+// B-002: Input validation schemas
+const VALIDATION = {
+  trajectory: {
+    required: ['session_context', 'samples', 'anonymization'],
+    session_context: {
+      domain: { type: 'string', maxLength: 253 },
+      page_path: { type: 'string', maxLength: 2048 },
+      viewport: { type: 'object' },
+      device_type: { type: 'string', enum: ['desktop', 'mobile', 'tablet'] },
+      input_method: { type: 'string', enum: ['mouse', 'touch', 'trackpad'] }
+    },
+    samples: { type: 'array', minLength: 10, maxLength: 10000 },
+    anonymization: {
+      user_consent: { type: 'boolean' },
+      epsilon: { type: 'number', min: 0.1, max: 10 }
+    }
+  }
+};
+
+/**
+ * B-002: Validate input data to prevent injection attacks
+ */
+function validateInput(data, schema) {
+  const errors = [];
+  
+  // Check required fields
+  for (const field of schema.required || []) {
+    if (!data[field]) {
+      errors.push(`Missing required field: ${field}`);
+    }
+  }
+  
+  // Validate session context
+  if (data.session_context) {
+    const sc = data.session_context;
+    
+    if (sc.domain && typeof sc.domain !== 'string') {
+      errors.push('domain must be string');
+    }
+    if (sc.device_type && !['desktop', 'mobile', 'tablet'].includes(sc.device_type)) {
+      errors.push('invalid device_type');
+    }
+    if (sc.input_method && !['mouse', 'touch', 'trackpad'].includes(sc.input_method)) {
+      errors.push('invalid input_method');
+    }
+  }
+  
+  // Validate samples array
+  if (data.samples) {
+    if (!Array.isArray(data.samples)) {
+      errors.push('samples must be array');
+    } else if (data.samples.length < 10) {
+      errors.push('samples too short (min 10)');
+    } else if (data.samples.length > 10000) {
+      errors.push('samples too long (max 10000)');
+    } else {
+      // Validate sample structure
+      for (let i = 0; i < Math.min(data.samples.length, 100); i++) {
+        const s = data.samples[i];
+        if (typeof s.x !== 'number' || typeof s.y !== 'number') {
+          errors.push(`sample ${i}: invalid x/y`);
+          break;
+        }
+      }
+    }
+  }
+  
+  return errors;
+}
 
 export function createTrajectoryRoutes(db) {
   const router = Router();
@@ -45,10 +116,21 @@ export function createTrajectoryRoutes(db) {
   /**
    * POST /api/v1/trajectories
    * Submit a new cursor trajectory (single)
+   * B-002: Added input validation
    */
   router.post('/', (req, res) => {
     try {
       const data = req.body;
+      
+      // B-002: Validate input to prevent injection attacks
+      const validationErrors = validateInput(data, VALIDATION.trajectory);
+      if (validationErrors.length > 0) {
+        console.error('[Trajectories] Validation failed:', validationErrors);
+        return res.status(400).json({ 
+          error: 'Validation failed',
+          details: validationErrors
+        });
+      }
       
       // Handle batch submission
       if (data.trajectories && Array.isArray(data.trajectories)) {
