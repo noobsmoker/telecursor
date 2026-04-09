@@ -98,6 +98,16 @@ app.get('/health', (req, res) => {
   });
 });
 
+// Health check for docker (also at /api/v1/health)
+app.get('/api/v1/health', (req, res) => {
+  res.json({ 
+    status: 'ok', 
+    timestamp: new Date().toISOString(),
+    version: '0.2.0',
+    uptime: process.uptime()
+  });
+});
+
 // Initialize database
 const db = initDatabase();
 
