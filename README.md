@@ -13,6 +13,16 @@ TeleCursor collects opt-in cursor telemetry with formal differential privacy gua
 
 All components are open source. Data collection is strictly opt-in. No exclusive commercial rights reserved.
 
+## Documentation
+
+| Doc | Description |
+|-----|-------------|
+| [📐 Architecture](docs/ARCHITECTURE.md) | System design, components, data flow |
+| [🔌 API Reference](docs/API.md) | REST endpoints, schemas, authentication |
+| [🔒 Privacy Policy](docs/PRIVACY.md) | Differential privacy guarantees, threat model |
+| [🤝 Contributing](docs/CONTRIBUTING.md) | Development setup, code standards, PR process |
+| [📋 Data Schema](docs/API.md#data-schemas) | Trajectory, sample, and event structures |
+
 ## Repository Structure
 
 ```
@@ -41,6 +51,10 @@ telecursor/
 ├── dataset/ # Data processing utilities
 │ └── preprocessing/
 ├── docs/ # Documentation
+│   ├── ARCHITECTURE.md
+│   ├── API.md
+│   ├── PRIVACY.md
+│   └── CONTRIBUTING.md
 └── docker-compose.yml # Deployment configuration
 ```
 
@@ -106,6 +120,6 @@ MIT License. See [LICENSE](LICENSE). Data contributions are licensed under CC-BY
 
 ## Contact
 
-Issues: GitHub Issues 
-Security: security@telecursor.ai 
-Research: research@telecursor.ai
+- Issues: [GitHub Issues](https://github.com/noobsmoker/telecursor/issues)
+- Security: security@telecursor.ai
+- Research: research@telecursor.ai
