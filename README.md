@@ -1,6 +1,22 @@
 # TeleCursor
 
+[![CI/CD](https://github.com/noobsmoker/telecursor/actions/workflows/ci.yml/badge.svg)](https://github.com/noobsmoker/telecursor/actions)
+[![Node.js](https://img.shields.io/node/v20.svg)](https://nodejs.org)
+[![Python](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org)
+[![License](https://img.shields.io/github/license/noobsmoker/telecursor)](LICENSE)
+
 Open infrastructure for cursor behavior research. Dataset and models for understanding human-computer interaction at the motor level.
+
+## ✨ Features
+
+| Feature | Description |
+|---------|-------------|
+| **Differential Privacy** | ε ≤ 3.0 local DP in browser before transmission |
+| **Causal Transformers** | RoPE + SwiGLU architecture for cursor dynamics |
+| **Bot Detection** | Automated trajectory filtering with ML classifiers |
+| **Manifest V3** | Modern Chrome/Firefox extension |
+| **Docker Ready** | One-command deployment with docker-compose |
+| **Open Data** | CC-BY-SA licensed dataset with privacy overlay |
 
 ## Overview
 

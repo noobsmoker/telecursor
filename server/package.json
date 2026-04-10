@@ -4,6 +4,9 @@
   "description": "TeleCursor data collection server with ClickHouse analytics",
   "main": "src/index.js",
   "type": "module",
+  "engines": {
+    "node": ">=20.0.0"
+  },
   "scripts": {
     "start": "node src/index.js",
     "dev": "node --watch src/index.js",
