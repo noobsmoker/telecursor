@@ -15,6 +15,9 @@ import logging
 
 from model import CursorDynamicsModel, CursorConfig, CursorTokenizer, CursorDataset
 
+# O-009: Mixed precision training (AMP)
+scaler = torch.cuda.amp.GradScaler() if torch.cuda.is_available() else None
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -47,7 +50,7 @@ def load_trajectories(data_dir: Path, split: str = 'train'):
 
 
 def train_epoch(model, dataloader, optimizer, scheduler, config, device, use_checkpoint: bool = False):
-    """Train for one epoch"""
+    """Train for one epoch with mixed precision (AMP)"""
     model.train()
     total_loss = 0
     total_position_loss = 0
@@ -60,20 +63,31 @@ def train_epoch(model, dataloader, optimizer, scheduler, config, device, use_che
         
         optimizer.zero_grad()
         
-        # Forward pass with gradient checkpointing if enabled
-        outputs = model(inputs, use_checkpoint=use_checkpoint)
-        loss_dict = model.compute_loss(outputs, targets, config)
+        # O-009: Mixed precision training with AMP
+        with torch.cuda.amp.autocast() if device.type == 'cuda' else torch.no_grad():
+            # Forward pass with gradient checkpointing if enabled
+            outputs = model(inputs, use_checkpoint=use_checkpoint)
+            loss_dict = model.compute_loss(outputs, targets, config)
+            loss = loss_dict['total']
         
-        loss = loss_dict['total']
-        loss.backward()
+        # O-009: Scale loss and backward with GradScaler
+        if device.type == 'cuda' and scaler is not None:
+            scaler.scale(loss).backward()
+            scaler.unscale_(optimizer)
+            torch.nn.utils.clip_grad_norm_(
+                model.parameters(),
+                config.get('gradient_clipping', 1.0)
+            )
+            scaler.step(optimizer)
+            scaler.update()
+        else:
+            loss.backward()
+            torch.nn.utils.clip_grad_norm_(
+                model.parameters(),
+                config.get('gradient_clipping', 1.0)
+            )
+            optimizer.step()
         
-        # Gradient clipping
-        torch.nn.utils.clip_grad_norm_(
-            model.parameters(),
-            config.get('gradient_clipping', 1.0)
-        )
-        
-        optimizer.step()
         scheduler.step()
         
         # Logging

@@ -15,7 +15,20 @@ const CONFIG = {
   maxRetries: 3,
   retryDelay: 5000,
   maxQueueSize: 100,  // Prevent memory bloat
-  maxStoredSessions: 50  // Cleanup old sessions
+  maxStoredSessions: 50,  // Cleanup old sessions
+  circuitBreaker: {
+    failureThreshold: 5,    // Open circuit after 5 failures
+    resetTimeout: 30000,      // Wait 30s before retry
+    halfOpenRequests: 1       // Single request to test
+  }
+};
+
+// Circuit breaker state
+const circuitBreaker = {
+  state: 'CLOSED',  // CLOSED, OPEN, HALF_OPEN
+  failures: 0,
+  lastFailureTime: 0,
+  nextAttempt: 0
 };
 
 // State - use atomic operations for thread safety
@@ -332,15 +345,50 @@ function requeueBatch(batch) {
 async function uploadBatch(batch, serverUrl) {
   const trajectories = batch.map(item => item.data);
   
-  return fetch(serverUrl, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'X-Telemetry-Consent': 'true',
-      'X-Client-Version': chrome.runtime.getManifest().version
-    },
-    body: JSON.stringify({ trajectories })
-  });
+  // Check circuit breaker before attempting upload
+  const now = Date.now();
+  if (circuitBreaker.state === 'OPEN') {
+    if (now < circuitBreaker.nextAttempt) {
+      throw new Error('Circuit breaker OPEN, skipping upload');
+    }
+    // Transition to half-open
+    circuitBreaker.state = 'HALF_OPEN';
+    console.log('[CursorTelemetry] Circuit breaker: HALF_OPEN, attempting test request');
+  }
+  
+  try {
+    const response = await fetch(serverUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Telemetry-Consent': 'true',
+        'X-Client-Version': chrome.runtime.getManifest().version
+      },
+      body: JSON.stringify({ trajectories })
+    });
+    
+    // Record success - close circuit breaker
+    if (circuitBreaker.state !== 'CLOSED') {
+      circuitBreaker.state = 'CLOSED';
+      circuitBreaker.failures = 0;
+      console.log('[CursorTelemetry] Circuit breaker: CLOSED');
+    }
+    
+    return response;
+    
+  } catch (error) {
+    // Record failure - open circuit breaker if threshold reached
+    circuitBreaker.failures++;
+    circuitBreaker.lastFailureTime = now;
+    
+    if (circuitBreaker.failures >= CONFIG.circuitBreaker.failureThreshold) {
+      circuitBreaker.state = 'OPEN';
+      circuitBreaker.nextAttempt = now + CONFIG.circuitBreaker.resetTimeout;
+      console.log(`[CursorTelemetry] Circuit breaker: OPEN (${circuitBreaker.failures} failures)`);
+    }
+    
+    throw error;
+  }
 }
 
 // Debug helper

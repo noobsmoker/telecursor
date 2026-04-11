@@ -11,17 +11,23 @@
 /**
  * Circular buffer for efficient velocity calculation
  * O(1) push/pop instead of O(n) array operations
+ * OPTIMIZED: Uses TypedArray for memory efficiency
  */
 class CircularVelocityBuffer {
   constructor(size = 5) {
     this.size = size;
-    this.buffer = new Array(size);
+    // Use TypedArrays for memory efficiency (Float64Array)
+    this.timestamps = new Float64Array(size);
+    this.vx = new Float64Array(size);
+    this.vy = new Float64Array(size);
     this.index = 0;
     this.count = 0;
   }
 
   push(vx, vy, t) {
-    this.buffer[this.index] = { vx, vy, t };
+    this.vx[this.index] = vx;
+    this.vy[this.index] = vy;
+    this.timestamps[this.index] = t;
     this.index = (this.index + 1) % this.size;
     this.count = Math.min(this.count + 1, this.size);
   }
@@ -30,25 +36,30 @@ class CircularVelocityBuffer {
     if (this.count === 0) return { vx: 0, vy: 0 };
     let sumVx = 0, sumVy = 0;
     for (let i = 0; i < this.count; i++) {
-      sumVx += this.buffer[i].vx;
-      sumVy += this.buffer[i].vy;
+      sumVx += this.vx[i];
+      sumVy += this.vy[i];
     }
     return { vx: sumVx / this.count, vy: sumVy / this.count };
   }
 
   getAcceleration(prevVx, prevVy) {
     if (this.count < 2) return { ax: 0, ay: 0 };
-    const curr = this.buffer[(this.index - 1 + this.size) % this.size];
-    const dt = curr.t - this.buffer[0].t;
+    const currIdx = (this.index - 1 + this.size) % this.size;
+    const currVx = this.vx[currIdx];
+    const currVy = this.vy[currIdx];
+    const currT = this.timestamps[currIdx];
+    const dt = currT - this.timestamps[0];
     if (dt <= 0) return { ax: 0, ay: 0 };
     return {
-      ax: (curr.vx - prevVx) / dt * 1000,
-      ay: (curr.vy - prevVy) / dt * 1000
+      ax: (currVx - prevVx) / dt * 1000,
+      ay: (currVy - prevVy) / dt * 1000
     };
   }
 
   clear() {
-    this.buffer = new Array(this.size);
+    this.timestamps = new Float64Array(this.size);
+    this.vx = new Float64Array(this.size);
+    this.vy = new Float64Array(this.size);
     this.index = 0;
     this.count = 0;
   }
@@ -274,21 +285,33 @@ class CursorTracker {
   }
 
   /**
-   * Track scroll events (throttled)
+   * Track scroll events (debounced for performance)
    */
   onScroll(event) {
     if (!this.isTracking) return;
     
     const now = Date.now();
-    if (now - this.lastScrollTime < 500) return;
+    if (now - this.lastScrollTime < 150) return;  // Debounce at 150ms
     this.lastScrollTime = now;
     
-    this.recordInteraction('scroll', event, {
-      scrollX: window.scrollX,
-      scrollY: window.scrollY,
-      scrollDeltaX: event.deltaX || 0,
-      scrollDeltaY: event.deltaY || 0
-    });
+    // Use requestIdleCallback for non-critical work
+    if ('requestIdleCallback' in window) {
+      requestIdleCallback(() => {
+        this.recordInteraction('scroll', event, {
+          scrollX: window.scrollX,
+          scrollY: window.scrollY,
+          scrollDeltaX: event.deltaX || 0,
+          scrollDeltaY: event.deltaY || 0
+        });
+      }, { timeout: 100 });
+    } else {
+      this.recordInteraction('scroll', event, {
+        scrollX: window.scrollX,
+        scrollY: window.scrollY,
+        scrollDeltaX: event.deltaX || 0,
+        scrollDeltaY: event.deltaY || 0
+      });
+    }
   }
 
   /**

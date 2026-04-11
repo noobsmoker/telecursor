@@ -33,7 +33,7 @@ const argv = yargs(process.argv.slice(2))
   })
   .option('max-body-size', {
     type: 'number',
-    default: 1048576,  // 1MB
+    default: 10485760,  // 10MB
     description: 'Max request body size in bytes'
   })
   .option('rate-limit', {
@@ -43,17 +43,37 @@ const argv = yargs(process.argv.slice(2))
   })
   .option('cors-origin', {
     type: 'string',
-    default: '*',
-    description: 'CORS origin'
+    default: 'https://telecursor.example.com',  // Strict whitelist - UPDATE FOR PRODUCTION
+    description: 'CORS origin (comma-separated for multiple)'
   })
   .parse();
 
 const app = express();
 
-// Security middleware
+// Security middleware - strict configuration
 app.use(helmet({
-  contentSecurityPolicy: false, // Disable for API
-  crossOriginEmbedderPolicy: false
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      scriptSrc: ["'self'"],
+      styleSrc: ["'self'", "'unsafe-inline'"],
+      imgSrc: ["'self'", "data:"],
+      connectSrc: ["'self'"],
+      fontSrc: ["'self'"],
+      objectSrc: ["'none'"],
+      upgradeInsecureRequests: []
+    }
+  },
+  crossOriginEmbedderPolicy: false,
+  hsts: {
+    maxAge: 31536000,  // 1 year
+    includeSubDomains: true,
+    preload: true
+  },
+  xssFilter: true,
+  noSniff: true,
+  referrerPolicy: { policy: 'strict-origin-when-cross-origin' },
+  hidePoweredBy: true
 }));
 
 // Compression for responses
@@ -75,18 +95,26 @@ app.use(loggingMiddleware);
 // Rate limiting
 app.use(rateLimitMiddleware(argv.rateLimit));
 
-// CORS
-app.use((req, res, next) => {
-  res.header('Access-Control-Allow-Origin', argv.corsOrigin);
-  res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Telemetry-Consent');
-  res.header('Access-Control-Max-Age', '86400');
+// CORS - strict whitelist only
+  const corsOrigins = (argv.corsOrigin || '').split(',').map(o => o.trim()).filter(Boolean);
   
-  if (req.method === 'OPTIONS') {
-    return res.sendStatus(204);
-  }
-  next();
-});
+  app.use((req, res, next) => {
+    const origin = req.headers.origin;
+    if (corsOrigins.includes('*')) {
+      // Wildcard only in development
+      res.header('Access-Control-Allow-Origin', '*');
+    } else if (corsOrigins.length > 0 && corsOrigins.includes(origin)) {
+      res.header('Access-Control-Allow-Origin', origin);
+    }
+    res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+    res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Telemetry-Consent');
+    res.header('Access-Control-Max-Age', '86400');
+    
+    if (req.method === 'OPTIONS') {
+      return res.sendStatus(204);
+    }
+    next();
+  });
 
 // Health check with basic system info
 app.get('/health', (req, res) => {
