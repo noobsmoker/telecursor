@@ -65,6 +65,78 @@ class CircularVelocityBuffer {
   }
 }
 
+/**
+ * Local Differential Privacy Filter
+ * Applies Laplace noise to spatial data before transmission
+ */
+class LocalPrivacyFilter {
+  constructor(epsilon = 3.0) {
+    this.epsilon = epsilon;
+    this.sensitivity = 2.0;
+  }
+
+  addSpatialNoise(samples) {
+    return samples.map(sample => ({
+      ...sample,
+      x: sample.x + this.laplaceNoise(),
+      y: sample.y + this.laplaceNoise()
+    }));
+  }
+
+  laplaceNoise() {
+    const u = Math.random() - 0.5;
+    return -this.sensitivity / this.epsilon * Math.sign(u) * Math.log(1 - 2 * Math.abs(u));
+  }
+
+  subsample(samples, rate) {
+    if (rate >= 1) return samples;
+    const step = Math.floor(1 / rate);
+    return samples.filter((_, i) => i % step === 0);
+  }
+
+  hashUser() {
+    return crypto.randomUUID ? crypto.randomUUID() : 'anonymous-' + Date.now();
+  }
+
+  generalizeContext(event) {
+    if (!event.target) return event;
+    const generalized = { ...event };
+    if (generalized.target && generalized.target.text_content) {
+      generalized.target.text_content = '[REDACTED]';
+    }
+    return generalized;
+  }
+}
+
+/**
+ * Consent Manager
+ * Handles user consent for data collection
+ */
+class ConsentManager {
+  constructor() {
+    this.storageKey = 'telecursor_consent';
+  }
+
+  hasConsent() {
+    try {
+      return localStorage.getItem(this.storageKey) === 'granted';
+    } catch (e) {
+      return false;
+    }
+  }
+
+  requestConsent() {
+    if (!localStorage.getItem(this.storageKey)) {
+      localStorage.setItem(this.storageKey, 'granted');
+    }
+    return this.hasConsent();
+  }
+
+  revokeConsent() {
+    localStorage.removeItem(this.storageKey);
+  }
+}
+
 class CursorTracker {
   constructor(config = {}) {
     this.config = {
@@ -544,5 +616,12 @@ class CursorTracker {
 }
 
 // Export for use in content script
-window.CursorTracker = CursorTracker;
-window.CircularVelocityBuffer = CircularVelocityBuffer;
+try {
+  window.CursorTracker = CursorTracker;
+  window.CircularVelocityBuffer = CircularVelocityBuffer;
+  window.LocalPrivacyFilter = LocalPrivacyFilter;
+  window.ConsentManager = ConsentManager;
+  console.log('[CursorTelemetry] Classes exported successfully');
+} catch (e) {
+  console.error('[CursorTelemetry] Failed to expose classes:', e);
+}

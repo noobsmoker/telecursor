@@ -43,7 +43,7 @@ const argv = yargs(process.argv.slice(2))
   })
   .option('cors-origin', {
     type: 'string',
-    default: 'https://telecursor.example.com',  // Strict whitelist - UPDATE FOR PRODUCTION
+    default: 'http://localhost:3000,http://localhost:3001,http://localhost:3002,chrome-extension://*',
     description: 'CORS origin (comma-separated for multiple)'
   })
   .parse();

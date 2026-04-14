@@ -11,6 +11,7 @@ services:
       - NODE_ENV=production
       - TELECURSOR_DB_PATH=/data/telecursor.db
       - TELECURSOR_PORT=3000
+      - TELECURSOR_CORS_ORIGIN=http://localhost:3000,http://localhost:3001,chrome-extension://*
     volumes:
       - ./data:/data
     restart: unless-stopped
@@ -20,6 +21,25 @@ services:
       timeout: 10s
       retries: 3
       start_period: 10s
+    networks:
+      - telecursor-network
+
+  # ClickHouse for analytics (referenced in package.json)
+  clickhouse:
+    image: clickhouse/clickhouse-server:latest
+    ports:
+      - "8123:8123"
+      - "9000:9000"
+    volumes:
+      - clickhouse_data:/var/lib/clickhouse
+    environment:
+      - CLICKHOUSE_DB=telecursor
+      - CLICKHOUSE_USER=default
+      - CLICKHOUSE_PASSWORD=telecursor
+      - CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT=1
+    networks:
+      - telecursor-network
+    restart: unless-stopped
 
   prometheus:
     image: prom/prometheus:latest
@@ -27,11 +47,13 @@ services:
       - "9090:9090"
     volumes:
       - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
-      - ./monitoring/prometheus_data:/prometheus
+      - prometheus_data:/prometheus
     command:
       - '--config.file=/etc/prometheus/prometheus.yml'
       - '--storage.tsdb.path=/prometheus'
     restart: unless-stopped
+    networks:
+      - telecursor-network
 
   grafana:
     image: grafana/grafana:latest
@@ -45,23 +67,29 @@ services:
       - ./monitoring/grafana/datasources:/etc/grafana/provisioning/datasources
     depends_on:
       - prometheus
+      - server
     restart: unless-stopped
+    networks:
+      - telecursor-network
 
-  # Development service
+  # Development service (port changed to 3002 to avoid conflict)
   dev:
     build:
       context: ./server
       dockerfile: Dockerfile
       target: development
     ports:
-      - "3000:3000"
+      - "3002:3000"
       - "9229:9229"
     environment:
       - NODE_ENV=development
       - TELECURSOR_DB_PATH=/data/telecursor.db
+      - TELECURSOR_CORS_ORIGIN=http://localhost:3002,chrome-extension://*
     volumes:
       - ./server/src:/app/src
       - ./data:/data
+    networks:
+      - telecursor-network
     command: npm run dev
 
 volumes:
@@ -69,3 +97,9 @@ volumes:
     driver: local
   prometheus_data:
     driver: local
+  clickhouse_data:
+    driver: local
+
+networks:
+  telecursor-network:
+    driver: bridge
