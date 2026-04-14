@@ -322,7 +322,7 @@ class TaskReasoningModel(nn.Module):
     
     def compute_loss(
         self, 
-        outputs: Dict, torch.Tensor,
+        outputs: Dict[str, torch.Tensor],
         targets: Dict,
         config: TaskReasoningConfig
     ) -> Dict[str, torch.Tensor]:
