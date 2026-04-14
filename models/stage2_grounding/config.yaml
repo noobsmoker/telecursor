@@ -1,0 +1,66 @@
+# Stage 2: Semantic Grounding Model Configuration
+# Fuses cursor trajectories with DOM structure
+
+# Base model dimensions (matches Stage 1)
+d_model: 768
+n_heads: 12
+n_layers: 12
+
+# DOM encoding
+max_elements: 100
+dom_embed_dim: 256
+max_dom_depth: 20
+
+# Cross-attention configuration
+cross_attn_layers: 4
+cross_attn_heads: 8
+
+# Output heads
+num_intents: 10  # browse, search, form_fill, click, scroll, etc.
+
+# Training hyperparameters
+learning_rate: 1.0e-4  # Fine-tuning rate
+weight_decay: 0.01
+dropout: 0.1
+
+# Optimizer
+optimizer: adamw
+beta1: 0.9
+beta2: 0.95
+
+# Learning rate schedule
+warmup_steps: 1000
+total_steps: 500000
+scheduler: cosine
+
+# Fine-tuning strategy
+unfreeze_encoder_step: 100000  # Unfreeze Stage 1 after 100k steps
+grad_clip: 1.0
+
+# Batch size (adjust based on GPU memory)
+batch_size: 16
+gradient_accumulation: 4  # Effective batch = 64
+
+# Data
+max_seq_len: 2048
+max_elements: 100
+
+# Loss weights
+loss_weights:
+  element_attention: 1.0
+  click: 1.5
+  intent: 1.0
+
+# Evaluation
+eval_every: 5000
+save_checkpoint_every: 10000
+num_checkpoints_to_keep: 3
+
+# Mixed precision
+use_amp: true
+amp_dtype: bfloat16
+
+# Logging
+log_every: 100
+project: telecursor
+run_name: stage2-grounding
