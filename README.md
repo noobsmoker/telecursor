@@ -16,6 +16,7 @@ Open infrastructure for cursor behavior research. Dataset and models for underst
 | **Bot Detection** | Automated trajectory filtering with ML classifiers |
 | **Manifest V3** | Modern Chrome/Firefox extension |
 | **Docker Ready** | One-command deployment with docker-compose |
+| **Cursor Glow** | Visual feedback when tracking is active |
 | **Open Data** | CC-BY-SA licensed dataset with privacy overlay |
 
 ## Overview
@@ -75,6 +76,12 @@ telecursor/
 ```
 
 ## Quick Start
+
+### One-Line Install (Recommended)
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/noobsmoker/telecursor/main/install.sh | bash
+```
 
 ### Prerequisites
 

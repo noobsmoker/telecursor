@@ -3,6 +3,10 @@
 ## Development Setup
 
 ```bash
+# One-line install (Recommended)
+curl -fsSL https://raw.githubusercontent.com/noobsmoker/telecursor/main/install.sh | bash
+
+# Manual setup
 git clone https://github.com/noobsmoker/telecursor.git
 cd telecursor
 

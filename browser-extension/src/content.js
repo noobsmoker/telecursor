@@ -156,6 +156,7 @@ class CursorTracker {
     this.lastSample = null;
     this.isTracking = false;
     this.sessionId = this.generateUUID();
+    this.glowStyleId = 'telecursor-glow-style';
     
     // Circular buffer for O(1) velocity
     this.velocityBuffer = new CircularVelocityBuffer(5);
@@ -195,6 +196,9 @@ class CursorTracker {
     this.prevVelocity = { vx: 0, vy: 0 };
     this.isTracking = true;
     
+    // Add cursor glow effect
+    this.addCursorGlow();
+    
     // Attach event listeners
     document.addEventListener('mousemove', this.onMouseMove, { passive: true });
     document.addEventListener('mousedown', this.onMouseDown, { passive: true });
@@ -211,6 +215,80 @@ class CursorTracker {
     
     console.log('[CursorTelemetry] Tracking started:', this.sessionId);
   }
+  
+  /**
+   * Add CSS-based glow effect to cursor
+   */
+  addCursorGlow() {
+    // Remove existing glow if any
+    this.removeCursorGlow();
+    
+    // Create style element for cursor glow
+    const style = document.createElement('style');
+    style.id = this.glowStyleId;
+    style.textContent = `
+      * {
+        cursor: none !important;
+      }
+      
+      .telecursor-glow {
+        position: fixed !important;
+        pointer-events: none !important;
+        width: 24px !important;
+        height: 24px !important;
+        border-radius: 50% !important;
+        background: radial-gradient(circle, rgba(0, 123, 255, 0.3) 0%, rgba(0, 123, 255, 0) 70%) !important;
+        border: 2px solid rgba(0, 123, 255, 0.6) !important;
+        z-index: 999999 !important;
+        transform: translate(-50%, -50%) !important;
+      }
+    `;
+    document.head.appendChild(style);
+    
+    // Create glow element
+    const glow = document.createElement('div');
+    glow.className = 'telecursor-glow';
+    glow.id = 'telecursor-glow';
+    document.body.appendChild(glow);
+    
+    // Update glow position on mousemove
+    const updateGlowPosition = (event) => {
+      if (!this.isTracking) return;
+      glow.style.left = `${event.clientX}px`;
+      glow.style.top = `${event.clientY}px`;
+    };
+    
+    // Store reference to update function for cleanup
+    this.glowUpdateFunction = updateGlowPosition;
+    document.addEventListener('mousemove', updateGlowPosition, { passive: true });
+  }
+  
+  /**
+   * Remove cursor glow effect
+   */
+  removeCursorGlow() {
+    // Remove style element
+    const style = document.getElementById(this.glowStyleId);
+    if (style) {
+      style.remove();
+    }
+    
+    // Remove glow element
+    const glow = document.getElementById('telecursor-glow');
+    if (glow) {
+      glow.remove();
+    }
+    
+    // Remove mousemove listener for glow update
+    if (this.glowUpdateFunction) {
+      document.removeEventListener('mousemove', this.glowUpdateFunction);
+      this.glowUpdateFunction = null;
+    }
+    
+    // Reset cursor
+    document.documentElement.style.cursor = '';
+    document.body.style.cursor = '';
+  }
 
   /**
    * Stop tracking and return collected data
@@ -219,6 +297,9 @@ class CursorTracker {
     if (!this.isTracking) return null;
     
     this.isTracking = false;
+    
+    // Remove cursor glow effect
+    this.removeCursorGlow();
     
     // Remove event listeners
     document.removeEventListener('mousemove', this.onMouseMove);
