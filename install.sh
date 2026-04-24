@@ -1,10 +1,41 @@
 #!/bin/bash
-# One-line install command for TeleCursor (macOS/Linux)
+# One-line install command for TeleCursor (macOS/Linux) - With Python Detection
 # Usage: curl -fsSL https://raw.githubusercontent.com/noobsmoker/telecursor/main/install.sh | bash
 
 set -e
 
-# Check OS and provide appropriate instructions
+# ======== FUNCTION: Check for Python ========
+check_python() {
+    if command -v python3 &> /dev/null; then
+        PYTHON="python3"
+    elif command -v python &> /dev/null; then
+        PYTHON="python"
+    else
+        echo "❌ Python 3 not found."
+        echo ""
+        echo "Please install Python 3.10+ manually:"
+        if [[ "$OSTYPE" == "darwin"* ]]; then
+            echo "   brew install python"
+        elif command -v apt-get &> /dev/null; then
+            echo "   sudo apt-get install python3 python3-pip python3-venv"
+        elif command -v dnf &> /dev/null; then
+            echo "   sudo dnf install python3 python3-pip"
+        elif command -v yum &> /dev/null; then
+            echo "   sudo yum install python3 python3-pip"
+        elif command -v pacman &> /dev/null; then
+            echo "   sudo pacman -S python python-pip"
+        else
+            echo "   Please install Python 3.10+ manually from https://python.org"
+        fi
+        echo ""
+        echo "After installing Python, run this script again."
+        exit 1
+    fi
+    echo "✅ Using $PYTHON — $("$PYTHON" --version)"
+    echo ""
+}
+
+# ======== MAIN: Check OS ========
 OS="$(uname -s)"
 case "$OS" in
   Darwin*)
@@ -33,6 +64,9 @@ case "$OS" in
 esac
 
 echo "🚀 Installing TeleCursor on $PLATFORM..."
+
+# Check for Python
+check_python
 
 # Check if git is available
 if ! command -v git &> /dev/null; then
