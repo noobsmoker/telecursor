@@ -79,8 +79,14 @@ telecursor/
 
 ### One-Line Install (Recommended)
 
+**macOS / Linux:**
 ```bash
 curl -fsSL https://raw.githubusercontent.com/noobsmoker/telecursor/main/install.sh | bash
+```
+
+**Windows (PowerShell):**
+```powershell
+irm https://raw.githubusercontent.com/noobsmoker/telecursor/main/install.ps1 | iex
 ```
 
 ### Prerequisites

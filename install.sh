@@ -1,10 +1,38 @@
 #!/bin/bash
-# One-line install command for TeleCursor
+# One-line install command for TeleCursor (macOS/Linux)
 # Usage: curl -fsSL https://raw.githubusercontent.com/noobsmoker/telecursor/main/install.sh | bash
 
 set -e
 
-echo "🚀 Installing TeleCursor..."
+# Check OS and provide appropriate instructions
+OS="$(uname -s)"
+case "$OS" in
+  Darwin*)
+    PLATFORM="macOS"
+    ;;
+  Linux*)
+    PLATFORM="Linux"
+    ;;
+  CYGWIN*|MINGW*|MSYS*)
+    echo "🪟 Windows detected!"
+    echo ""
+    echo "This script is for macOS/Linux only."
+    echo "Please run the PowerShell installer instead:"
+    echo ""
+    echo "   irm https://raw.githubusercontent.com/noobsmoker/telecursor/main/install.ps1 | iex"
+    echo ""
+    echo "Or open PowerShell and run:"
+    echo "   Invoke-RestMethod https://raw.githubusercontent.com/noobsmoker/telecursor/main/install.ps1 | Invoke-Expression"
+    exit 1
+    ;;
+  *)
+    echo "⚠️  Unrecognized OS: $OS"
+    echo "   Please follow manual installation steps in README.md"
+    exit 1
+    ;;
+esac
+
+echo "🚀 Installing TeleCursor on $PLATFORM..."
 
 # Check if git is available
 if ! command -v git &> /dev/null; then
@@ -15,25 +43,6 @@ fi
 # Clone the repository
 echo "📥 Cloning TeleCursor repository..."
 git clone https://github.com/noobsmoker/telecursor.git
-cd telecursor
-
-# Check OS and provide appropriate instructions
-OS="$(uname -s)"
-case "$OS" in
-  Darwin*)
-    echo "🍎 Detected macOS"
-    ;;
-  Linux*)
-    echo "🐧 Detected Linux"
-    ;;
-  CYGWIN*|MINGW*|MSYS*)
-    echo "🪟 Detected Windows"
-    ;;
-  *)
-    echo "⚠️  Unrecognized OS: $OS. Please follow manual installation steps."
-    echo "    This script works best in Git Bash, WSL, or macOS/Linux terminals."
-    ;;
-esac
 
 # Setup instructions
 echo ""
