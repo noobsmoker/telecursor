@@ -20,14 +20,30 @@ function Test-Python {
 # ======== FUNCTION: Install Python silently via winget ========
 function Install-Python {
     Write-Host "🐍 Python not found. Attempting to install via winget..." -ForegroundColor Yellow
-    
-    if (Get-Command winget -ErrorAction SilentlyContinue) {
-        Write-Host "Downloading and installing Python 3.11 via winget..." -ForegroundColor Green
-        winget install Python.Python.3.11 --silent --accept-package-agreements --accept-source-agreements
-        if ($LASTEXITCODE -ne 0) {
-            Write-Error "Python installation via winget failed. Please install Python 3.10+ manually from https://python.org"
-            exit 1
-        }
+    winget install --name "Python" --package-name "Python.Python.3.11" --accept-package-agreements --accept-source-agreements --silent --no-silent-mode
+    if ($LASTEXITCODE -ne 0) {
+        Write-Error "Python installation via winget failed. Please install Python 3.10+ manually from https://python.org"
+        exit 1
+    }
+    # Refresh PATH in current session
+    $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "User")
+    # Add Git installation
+    Install-Git
+}
+
+function Install-Git {
+    if (Get-CommandSafe "git") {
+        return  # Already installed
+    }
+    Write-Host "🔧 Git not found. Installing Git via winget..." -ForegroundColor Yellow
+    winget install --name "Git" --package-name "Git.Git" --accept-package-agreements --accept-source-agreements --silent --no-silent-mode
+    if ($LASTEXITCODE -ne 0) {
+        Write-Error "Git installation via winget failed. Please install Git manually."
+        exit 1
+    }
+    # Refresh PATH with Git's location
+    $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "User")
+}
         # Refresh PATH in current session
         $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "User")
     } else {
