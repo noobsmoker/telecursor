@@ -9,50 +9,67 @@ Write-Host "Installing TeleCursor on Windows..." -ForegroundColor Cyan
 function Test-Python {
     $pythonCmds = @("python", "python3", "py")
     foreach ($cmd in $pythonCmds) {
-        if (Get-Command $cmd -ErrorAction SilentlyContinue) {
+        $pythonCmd = Get-Command $cmd -ErrorAction SilentlyContinue
+        if ($pythonCmd) {
             return $cmd
         }
     }
     return $null
 }
 
-# ======== FUNCTION: Install Python silently via winget ========
+# ======== FUNCTION: Install Python via winget ========
 function Install-Python {
-    Write-Host "🐍 Python not found. Attempting to install via winget..." -ForegroundColor Yellow
-    winget install --id Python.Python.3.11 --accept-package-agreements --accept-source-agreements --silent
+    Write-Host "Python not found. Installing Python 3.11 via winget..." -ForegroundColor Yellow
+    
+    # Correct winget syntax - use the query directly or --id flag
+    winget install --id Python.Python.3.11 -e --silent --accept-package-agreements --accept-source-agreements
+    
     if ($LASTEXITCODE -ne 0) {
-        Write-Error "Python installation via winget failed. Install manually: https://python.org"
+        Write-Host "Trying alternative installation method..." -ForegroundColor Yellow
+        # Try without --id flag, just use the package ID as query
+        winget install Python.Python.3.11 -e --silent --accept-package-agreements --accept-source-agreements
+    }
+    
+    if ($LASTEXITCODE -ne 0) {
+        Write-Error "Python installation via winget failed. Please install Python 3.10+ manually from https://python.org"
         exit 1
     }
+    
     # Refresh PATH in current session
     $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "User")
+    Write-Host "Python installed successfully." -ForegroundColor Green
 }
 
 # ======== FUNCTION: Install Git via winget ========
 function Install-Git {
-    if (Get-CommandSafe "git") {
+    if (Get-Command "git" -ErrorAction SilentlyContinue) {
         return  # Already installed
     }
-    Write-Host "🔧 Git not found. Installing Git via winget..." -ForegroundColor Yellow
-    winget install --id Git.Git --accept-package-agreements --accept-source-agreements --silent
+    
+    Write-Host "Git not found. Installing Git via winget..." -ForegroundColor Yellow
+    
+    # Correct winget syntax for Git
+    winget install --id Git.Git -e --silent --accept-package-agreements --accept-source-agreements
+    
     if ($LASTEXITCODE -ne 0) {
-        Write-Error "Git installation via winget failed. Please install Git manually."
+        Write-Host "Trying alternative installation method..." -ForegroundColor Yellow
+        winget install Git.Git -e --silent --accept-package-agreements --accept-source-agreements
+    }
+    
+    if ($LASTEXITCODE -ne 0) {
+        Write-Error "Git installation via winget failed. Please install Git manually from https://git-scm.com/"
         exit 1
     }
-    # Refresh PATH with Git's location
+    
+    # Refresh PATH
     $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "User")
-}
-
-# Small helper
-function Get-CommandSafe {
-    param([string]$Name)
-    Get-Command $Name -ErrorAction SilentlyContinue
+    Write-Host "Git installed successfully." -ForegroundColor Green
 }
 
 # ======== FUNCTION: Handle Python App Execution Alias Bug ========
 function Handle-AppAlias {
     try {
-        $ver = & python --version 2>&1
+        $result = & python --version 2>&1
         if ($LASTEXITCODE -ne 0) {
             return $true  # Alias present but broken
         }
@@ -64,7 +81,9 @@ function Handle-AppAlias {
 
 # ======== MAIN: Dependency Checks ========
 
-# 1) Python
+Write-Host "Checking dependencies..." -ForegroundColor Green
+
+# 1) Check Python
 $python = Test-Python
 $haveValidPython = $false
 
@@ -89,56 +108,75 @@ if (-not $haveValidPython) {
     }
 }
 
-Write-Host "🐍 Using Python: $(Invoke-Expression "$python --version")" -ForegroundColor Green
+Write-Host "Using Python: $(& $python --version)" -ForegroundColor Green
 
-# 2) Git
+# 2) Check Git
 Install-Git
-Write-Host "🔧 Git is available." -ForegroundColor Green
+Write-Host "Git is available." -ForegroundColor Green
 
-# ======== REST OF INSTALLATION ========
+# ======== CLONE AND INSTALL TELECURSOR ========
 
 Write-Host ""
-Write-Host "✅ Prerequisites satisfied. Continuing with TeleCursor setup..." -ForegroundColor Green
-
-# Check if git is installed
-if (-not (Get-CommandSafe "git")) {
-    Write-Error "git is still not available after installation."
-    exit 1
-}
+Write-Host "Prerequisites satisfied. Setting up TeleCursor..." -ForegroundColor Green
 
 # Clone the repository
 $installDir = "$env:USERPROFILE\telecursor"
+
 if (Test-Path $installDir) {
-    Write-Host "📁 Directory exists, pulling latest..." -ForegroundColor Yellow
+    Write-Host "Directory exists, pulling latest changes..." -ForegroundColor Yellow
     Set-Location $installDir
-    git pull
+    git pull origin main
 } else {
-    Write-Host "📥 Cloning repository..." -ForegroundColor Green
+    Write-Host "Cloning TeleCursor repository..." -ForegroundColor Green
     git clone https://github.com/noobsmoker/telecursor.git $installDir
+    if ($LASTEXITCODE -ne 0) {
+        Write-Error "Failed to clone repository"
+        exit 1
+    }
     Set-Location $installDir
 }
 
-# Install server dependencies
-Write-Host "📦 Installing server dependencies..." -ForegroundColor Green
+# Install server dependencies (Node.js)
+Write-Host "Installing Node.js dependencies..." -ForegroundColor Green
 Set-Location "$installDir\server"
-npm install
+if (Test-Path "package.json") {
+    npm install
+    if ($LASTEXITCODE -ne 0) {
+        Write-Error "Failed to install Node.js dependencies"
+        exit 1
+    }
+} else {
+    Write-Warning "package.json not found in server directory"
+}
 
 # Install Python model dependencies
-Write-Host "🐍 Installing Python dependencies..." -ForegroundColor Green
+Write-Host "Installing Python dependencies..." -ForegroundColor Green
 Set-Location "$installDir\models\stage1_cursor_dynamics"
 if (Test-Path "requirements.txt") {
     pip install -r requirements.txt
+    if ($LASTEXITCODE -ne 0) {
+        Write-Warning "Failed to install some Python dependencies"
+    }
+} else {
+    Write-Warning "requirements.txt not found"
 }
 
 # Done
 Set-Location $installDir
 Write-Host ""
-Write-Host "✅ Installation complete!" -ForegroundColor Green
-Write-Host "📍 Installed to: $installDir" -ForegroundColor Cyan
+Write-Host "========================================" -ForegroundColor Cyan
+Write-Host "  TeleCursor Installation Complete!" -ForegroundColor White
+Write-Host "========================================" -ForegroundColor Cyan
 Write-Host ""
-Write-Host "🚀 To start the server:" -ForegroundColor Yellow
-Write-Host "   cd $installDir\server" -ForegroundColor White
-Write-Host "   npm run dev" -ForegroundColor White
+Write-Host "Installed to: $installDir" -ForegroundColor Green
 Write-Host ""
-Write-Host "🖥️  To load extension: Chrome -> Extensions -> Developer mode" -ForegroundColor Yellow
-Write-Host "   -> Load unpacked -> Select: $installDir\browser-extension" -ForegroundColor White
+Write-Host "Next Steps:" -ForegroundColor Yellow
+Write-Host "  1. Start the server:" -ForegroundColor White
+Write-Host "     cd $installDir\server" -ForegroundColor Gray
+Write-Host "     npm run dev" -ForegroundColor Gray
+Write-Host ""
+Write-Host "  2. Load the browser extension:" -ForegroundColor White
+Write-Host "     Open Chrome -> Extensions -> Enable Developer mode" -ForegroundColor Gray
+Write-Host "     Click 'Load unpacked' -> Select: $installDir\browser-extension" -ForegroundColor Gray
+Write-Host ""
+Write-Host "Documentation: https://github.com/noobsmoker/telecursor" -ForegroundColor Cyan
