@@ -19,14 +19,13 @@ function Test-Python {
 # ======== FUNCTION: Install Python silently via winget ========
 function Install-Python {
     Write-Host "🐍 Python not found. Attempting to install via winget..." -ForegroundColor Yellow
-    winget install --name "Python" --package-name "Python.Python.3.11" --accept-package-agreements --accept-source-agreements --silent
+    winget install --id Python.Python.3.11 --accept-package-agreements --accept-source-agreements --silent
     if ($LASTEXITCODE -ne 0) {
-        Write-Error "Python installation via winget failed. Please install Python 3.10+ manually from https://python.org"
+        Write-Error "Python installation via winget failed. Install manually: https://python.org"
         exit 1
     }
     # Refresh PATH in current session
-    $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") +
-        ";" + [System.Environment]::GetEnvironmentVariable("Path", "User")
+    $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "User")
 }
 
 # ======== FUNCTION: Install Git via winget ========
@@ -35,14 +34,13 @@ function Install-Git {
         return  # Already installed
     }
     Write-Host "🔧 Git not found. Installing Git via winget..." -ForegroundColor Yellow
-    winget install --name "Git" --package-name "Git.Git" --accept-package-agreements --accept-source-agreements --silent
+    winget install --id Git.Git --accept-package-agreements --accept-source-agreements --silent
     if ($LASTEXITCODE -ne 0) {
         Write-Error "Git installation via winget failed. Please install Git manually."
         exit 1
     }
     # Refresh PATH with Git's location
-    $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") +
-        ";" + [System.Environment]::GetEnvironmentVariable("Path", "User")
+    $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "User")
 }
 
 # Small helper
